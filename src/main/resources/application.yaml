@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: it.mentor
+  liquibase:
+    enabled: false
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:dev-secret-key-must-be-at-least-32-characters-long}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.example.it.mentor: INFO
+    org.springframework.security: WARN
+    liquibase: WARN
