@@ -11,7 +11,6 @@ import com.example.it.mentor.entity.Role;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.security.JwtProvider;
-import com.example.it.mentor.security.UserDetailsServiceImpl;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.UserStatus;
 import org.junit.jupiter.api.DisplayName;
@@ -20,7 +19,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
@@ -43,7 +41,6 @@ class AuthServiceTest {
     @Mock private PasswordResetTokenRepository passwordResetTokenRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private JwtProvider jwtProvider;
-    @Mock private UserDetailsServiceImpl userDetailsService;
     @Mock private AuthMapper authMapper;
 
     // ── register ──────────────────────────────────────────────────────────────
@@ -88,12 +85,10 @@ class AuthServiceTest {
         var request = new LoginRequest("user@example.com", "password123");
         var user = buildUser("user@example.com", UserStatus.ACTIVE);
         var userInfo = new UserInfoResponse(1L, "user@example.com", java.util.List.of("STUDENT"), "ACTIVE");
-        var springUser = mock(UserDetails.class);
 
         when(userService.findByEmail("user@example.com")).thenReturn(user);
         when(passwordEncoder.matches("password123", user.getPasswordHash())).thenReturn(true);
-        when(userDetailsService.loadUserByUsername("user@example.com")).thenReturn(springUser);
-        when(jwtProvider.generateToken(springUser)).thenReturn("jwt-token");
+        when(jwtProvider.generateToken("user@example.com")).thenReturn("jwt-token");
         when(authMapper.toUserInfoResponse(user)).thenReturn(userInfo);
 
         var result = authService.login(request);

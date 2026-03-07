@@ -1,7 +1,6 @@
 package com.example.it.mentor.controller;
 
 import com.example.it.mentor.dto.*;
-import com.example.it.mentor.mapper.AuthMapper;
 import com.example.it.mentor.service.AuthService;
 import com.example.it.mentor.service.UserService;
 import jakarta.validation.Valid;
@@ -16,7 +15,6 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserService userService;
-    private final AuthMapper authMapper;
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
@@ -31,7 +29,7 @@ public class AuthController {
 
     @GetMapping("/me")
     public UserInfoResponse me() {
-        return authMapper.toUserInfoResponse(userService.getCurrentUser());
+        return userService.getCurrentUser();
     }
 
     @PostMapping("/password/forgot")

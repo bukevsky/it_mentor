@@ -10,12 +10,10 @@ import com.example.it.mentor.exception.UnauthorizedException;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.security.JwtProvider;
-import com.example.it.mentor.security.UserDetailsServiceImpl;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.UserStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +32,6 @@ public class AuthService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
-    private final UserDetailsServiceImpl userDetailsService;
     private final AuthMapper authMapper;
 
     @Transactional
@@ -79,8 +76,7 @@ public class AuthService {
             throw new UnauthorizedException("Аккаунт заблокирован");
         }
 
-        UserDetails userDetails = userDetailsService.loadUserByUsername(email);
-        String token = jwtProvider.generateToken(userDetails);
+        String token = jwtProvider.generateToken(user.getEmail());
 
         log.info("Успешный вход пользователя: {}", email);
         return new LoginResponse(token, "Bearer", authMapper.toUserInfoResponse(user));
