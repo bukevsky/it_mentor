@@ -3,6 +3,7 @@ package com.example.it.mentor.controller;
 import com.example.it.mentor.dto.*;
 import com.example.it.mentor.service.AuthService;
 import com.example.it.mentor.service.UserService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
+@Tag(name = "Auth", description = "Аутентификация и регистрация")
 public class AuthController {
 
     private final AuthService authService;

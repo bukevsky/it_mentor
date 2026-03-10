@@ -1,17 +1,15 @@
 package com.example.it.mentor.service;
 
 import com.example.it.mentor.dto.*;
-import com.example.it.mentor.entity.PasswordResetToken;
-import com.example.it.mentor.mapper.AuthMapper;
-import com.example.it.mentor.repository.PasswordResetTokenRepository;
+import com.example.it.mentor.entity.*;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.exception.UnauthorizedException;
-import com.example.it.mentor.entity.RoleCode;
+import com.example.it.mentor.mapper.AuthMapper;
+import com.example.it.mentor.repository.PasswordResetTokenRepository;
 import com.example.it.mentor.repository.RoleRepository;
+import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.security.JwtProvider;
-import com.example.it.mentor.entity.User;
-import com.example.it.mentor.entity.UserStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,6 +28,7 @@ public class AuthService {
     private final UserService userService;
     private final RoleRepository roleRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final StudentProfileRepository studentProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final AuthMapper authMapper;
@@ -53,6 +52,14 @@ public class AuthService {
                 .build();
 
         User saved = userService.save(user);
+
+        StudentProfile profile = StudentProfile.builder()
+                .user(saved)
+                .firstName(request.firstName())
+                .lastName(request.lastName())
+                .build();
+        studentProfileRepository.save(profile);
+
         log.info("Зарегистрирован новый пользователь: {}", email);
         return authMapper.toRegisterResponse(saved);
     }

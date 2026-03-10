@@ -29,6 +29,9 @@ public class User extends BaseEntity {
     @Builder.Default
     private boolean deleted = false;
 
+    @Column(name = "avatar_file_id")
+    private Long avatarFileId;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_roles",
