@@ -27,23 +27,21 @@ class JwtProviderTest {
     @Test
     @DisplayName("generateToken: возвращает непустой JWT")
     void generateToken_shouldReturnNonBlankToken() {
-        UserDetails user = buildUserDetails("user@example.com");
-        String token = jwtProvider.generateToken(user);
+        String token = jwtProvider.generateToken("user@example.com");
         assertThat(token).isNotBlank();
     }
 
     @Test
     @DisplayName("extractUsername: достаёт email из валидного JWT")
     void extractUsername_shouldReturnCorrectEmail() {
-        UserDetails user = buildUserDetails("user@example.com");
-        String token = jwtProvider.generateToken(user);
+        String token = jwtProvider.generateToken("user@example.com");
         assertThat(jwtProvider.extractUsername(token)).isEqualTo("user@example.com");
     }
 
     @Test
     @DisplayName("validateToken: валидный токен → true")
     void validateToken_withValidToken_shouldReturnTrue() {
-        String token = jwtProvider.generateToken(buildUserDetails("user@example.com"));
+        String token = jwtProvider.generateToken("user@example.com");
         assertThat(jwtProvider.validateToken(token)).isTrue();
     }
 
@@ -61,15 +59,8 @@ class JwtProviderTest {
         ReflectionTestUtils.setField(shortLived, "expirationMs", -1000L); // уже истёк
         ReflectionTestUtils.invokeMethod(shortLived, "initKey");
 
-        String token = shortLived.generateToken(buildUserDetails("user@example.com"));
+        String token = shortLived.generateToken("user@example.com");
         assertThat(shortLived.validateToken(token)).isFalse();
     }
 
-    private UserDetails buildUserDetails(String email) {
-        return User.builder()
-                .username(email)
-                .password("hashed")
-                .authorities(List.of(new SimpleGrantedAuthority("ROLE_STUDENT")))
-                .build();
-    }
 }

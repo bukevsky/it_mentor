@@ -1,7 +1,9 @@
 package com.example.it.mentor.service;
 
-import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.dto.UserInfoResponse;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.mapper.AuthMapper;
 import com.example.it.mentor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final AuthMapper authMapper;
 
     @Transactional(readOnly = true)
     public User findByEmail(String email) {
@@ -36,8 +39,8 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public User getCurrentUser() {
+    public UserInfoResponse getCurrentUser() {
         String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return findByEmail(email);
+        return authMapper.toUserInfoResponse(findByEmail(email));
     }
 }
