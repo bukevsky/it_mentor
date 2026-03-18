@@ -39,3 +39,9 @@ COMMENT ON COLUMN stored_files.uploaded_at IS 'Дата и время загру
 COMMENT ON COLUMN stored_files.created_at IS 'Дата и время создания записи';
 COMMENT ON COLUMN stored_files.updated_at IS 'Дата и время последнего обновления записи';
 --rollback SELECT 1;
+
+--changeset itmentor:008-add-avatar-to-users labels:stage1
+ALTER TABLE users
+    ADD COLUMN avatar_file_id BIGINT REFERENCES stored_files (id) ON DELETE SET NULL;
+COMMENT ON COLUMN users.avatar_file_id IS 'Ссылка на аватар пользователя';
+--rollback ALTER TABLE users DROP COLUMN avatar_file_id;

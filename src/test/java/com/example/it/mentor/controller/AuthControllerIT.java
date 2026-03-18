@@ -1,25 +1,28 @@
 package com.example.it.mentor.controller;
 
-import com.example.it.mentor.dto.LoginRequest;
-import com.example.it.mentor.dto.LoginResponse;
-import com.example.it.mentor.dto.RegisterRequest;
-import com.example.it.mentor.dto.RegisterResponse;
+import com.example.it.mentor.dto.*;
 import com.example.it.mentor.entity.UserStatus;
 import com.example.it.mentor.repository.UserRepository;
+import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
+
+import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 @AutoConfigureTestRestTemplate
+@DisplayName("AuthController IT")
 class AuthControllerIT {
 
     @Autowired
@@ -30,100 +33,248 @@ class AuthControllerIT {
 
     // ── POST /auth/register ───────────────────────────────────────────────────
 
-    @Test
-    @DisplayName("POST /auth/register: новый пользователь → 201 и роль STUDENT")
-    void register_newUser_shouldReturn201() {
-        var request = new RegisterRequest("new_it@example.com", "password123");
+    @Nested
+    @DisplayName("POST /auth/register")
+    class Register {
 
-        var response = restTemplate.postForEntity("/auth/register", request, RegisterResponse.class);
+        @Test
+        @DisplayName("новый пользователь → 201, email в нижнем регистре, роль STUDENT")
+        void newUser_shouldReturn201WithStudentRole() {
+            var request = new RegisterRequest("New_IT@Example.com", "password123", "Иван", "Иванов");
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().email()).isEqualTo("new_it@example.com");
-        assertThat(response.getBody().roles()).contains("STUDENT");
-    }
+            var response = restTemplate.postForEntity("/auth/register", request, RegisterResponse.class);
 
-    @Test
-    @DisplayName("POST /auth/register: дубликат email → 409")
-    void register_duplicateEmail_shouldReturn409() {
-        var request = new RegisterRequest("duplicate@example.com", "password123");
-        restTemplate.postForEntity("/auth/register", request, Object.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(response.getBody()).isNotNull();
 
-        var response = restTemplate.postForEntity("/auth/register", request, Object.class);
+            SoftAssertions softly = new SoftAssertions();
+            softly.assertThat(response.getBody().id()).as("id").isNotNull();
+            softly.assertThat(response.getBody().email())
+                    .as("email должен быть нормализован в нижний регистр")
+                    .isEqualTo("new_it@example.com");
+            softly.assertThat(response.getBody().roles())
+                    .as("роль должна быть STUDENT")
+                    .contains("STUDENT");
+            softly.assertAll();
+        }
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        @Test
+        @DisplayName("email в верхнем регистре → сохраняется в нижнем (нормализация)")
+        void uppercaseEmail_shouldBeNormalizedToLowercase() {
+            String uniqueEmail = "UPPER_" + UUID.randomUUID().toString().substring(0, 8) + "@EXAMPLE.COM";
+            var request = new RegisterRequest(uniqueEmail, "password123", "Анна", "Петрова");
+
+            var response = restTemplate.postForEntity("/auth/register", request, RegisterResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(response.getBody().email()).isEqualTo(uniqueEmail.toLowerCase());
+        }
+
+        @Test
+        @DisplayName("дубликат email → 409 Conflict")
+        void duplicateEmail_shouldReturn409() {
+            var request = new RegisterRequest("duplicate@example.com", "password123", "Иван", "Иванов");
+            restTemplate.postForEntity("/auth/register", request, Object.class);
+
+            var response = restTemplate.postForEntity("/auth/register", request, Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        }
+
+        @Test
+        @DisplayName("дубликат email с другим регистром → 409 (нормализация работает)")
+        void duplicateEmailDifferentCase_shouldReturn409() {
+            String email = "casedup_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+
+            // Тот же email, но в верхнем регистре
+            var response = restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email.toUpperCase(), "password123", "Иван", "Иванов"), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        }
+
+        @Test
+        @DisplayName("пустой firstName → 400 Bad Request")
+        void blankFirstName_shouldReturn400() {
+            var request = new RegisterRequest("valid@example.com", "password123", "", "Иванов");
+
+            var response = restTemplate.postForEntity("/auth/register", request, Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
+        @DisplayName("пустой lastName → 400 Bad Request")
+        void blankLastName_shouldReturn400() {
+            var request = new RegisterRequest("valid2@example.com", "password123", "Иван", "");
+
+            var response = restTemplate.postForEntity("/auth/register", request, Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
     }
 
     // ── POST /auth/login ──────────────────────────────────────────────────────
 
-    @Test
-    @DisplayName("POST /auth/login: валидные креды → 200 и JWT")
-    void login_validCredentials_shouldReturn200WithToken() {
-        restTemplate.postForEntity("/auth/register",
-                new RegisterRequest("login_ok@example.com", "password123"), Object.class);
+    @Nested
+    @DisplayName("POST /auth/login")
+    class Login {
 
-        var response = restTemplate.postForEntity("/auth/login",
-                new LoginRequest("login_ok@example.com", "password123"), LoginResponse.class);
+        @Test
+        @DisplayName("валидные учётные данные → 200, непустой JWT, tokenType Bearer")
+        void validCredentials_shouldReturn200WithToken() {
+            String email = "login_ok_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody().accessToken()).isNotBlank();
-        assertThat(response.getBody().tokenType()).isEqualTo("Bearer");
-    }
+            var response = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest(email, "password123"), LoginResponse.class);
 
-    @Test
-    @DisplayName("POST /auth/login: неверный пароль → 401")
-    void login_wrongPassword_shouldReturn401() {
-        restTemplate.postForEntity("/auth/register",
-                new RegisterRequest("login_bad@example.com", "password123"), Object.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody()).isNotNull();
 
-        var response = restTemplate.postForEntity("/auth/login",
-                new LoginRequest("login_bad@example.com", "wrongpassword"), Object.class);
+            SoftAssertions softly = new SoftAssertions();
+            softly.assertThat(response.getBody().accessToken()).as("accessToken").isNotBlank();
+            softly.assertThat(response.getBody().tokenType()).as("tokenType").isEqualTo("Bearer");
+            softly.assertThat(response.getBody().user()).as("user info").isNotNull();
+            softly.assertAll();
+        }
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        @Test
+        @DisplayName("неверный пароль → 401")
+        void wrongPassword_shouldReturn401() {
+            String email = "login_bad_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+
+            var response = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest(email, "wrongpassword"), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        @DisplayName("несуществующий email → 401 (не 404, чтобы не раскрывать наличие email)")
+        void nonExistentEmail_shouldReturn401NotLeak() {
+            var response = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest("ghost_" + UUID.randomUUID() + "@example.com", "pass"), Object.class);
+
+            assertThat(response.getStatusCode())
+                    .as("Несуществующий email должен возвращать 401, не 404")
+                    .isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        @DisplayName("email в верхнем регистре → 200 (вход нечувствителен к регистру)")
+        void uppercaseEmail_shouldLoginSuccessfully() {
+            String email = "case_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+
+            var response = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest(email.toUpperCase(), "password123"), LoginResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        @Test
+        @DisplayName("заблокированный пользователь → 401")
+        void blockedUser_shouldReturn401() {
+            String email = "blocked_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+
+            userRepository.findByEmailAndDeletedFalse(email).ifPresent(user -> {
+                user.setStatus(UserStatus.BLOCKED);
+                userRepository.save(user);
+            });
+
+            var response = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest(email, "password123"), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
     }
 
     // ── GET /auth/me ──────────────────────────────────────────────────────────
 
-    @Test
-    @DisplayName("GET /auth/me: c валидным Bearer → 200")
-    void me_withValidToken_shouldReturn200() {
-        restTemplate.postForEntity("/auth/register",
-                new RegisterRequest("me_ok@example.com", "password123"), Object.class);
-        var loginResponse = restTemplate.postForEntity("/auth/login",
-                new LoginRequest("me_ok@example.com", "password123"), LoginResponse.class);
-        String token = loginResponse.getBody().accessToken();
+    @Nested
+    @DisplayName("GET /auth/me")
+    class Me {
 
-        var response = restTemplate.exchange("/auth/me", HttpMethod.GET,
-                bearerRequest(token), Object.class);
+        @Test
+        @DisplayName("валидный Bearer токен → 200 и корректный user info")
+        void validToken_shouldReturn200WithUserInfo() {
+            String email = "me_ok_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+            var loginResponse = restTemplate.postForEntity("/auth/login",
+                    new LoginRequest(email, "password123"), LoginResponse.class);
+            String token = loginResponse.getBody().accessToken();
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            var response = restTemplate.exchange("/auth/me", HttpMethod.GET,
+                    bearerRequest(token), UserInfoResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody()).isNotNull();
+
+            SoftAssertions softly = new SoftAssertions();
+            softly.assertThat(response.getBody().email()).as("email").isEqualTo(email);
+            softly.assertThat(response.getBody().roles()).as("roles").contains("STUDENT");
+            softly.assertThat(response.getBody().status()).as("status").isNotBlank();
+            softly.assertAll();
+        }
+
+        @Test
+        @DisplayName("без токена → 401")
+        void withoutToken_shouldReturn401() {
+            var response = restTemplate.getForEntity("/auth/me", Object.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
+
+        @Test
+        @DisplayName("неверный токен → 401")
+        void invalidToken_shouldReturn401() {
+            var headers = new HttpHeaders();
+            headers.setBearerAuth("totally.invalid.jwt");
+            var response = restTemplate.exchange("/auth/me", HttpMethod.GET,
+                    new HttpEntity<>(headers), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        }
     }
 
-    @Test
-    @DisplayName("GET /auth/me: без токена → 401")
-    void me_withoutToken_shouldReturn401() {
-        var response = restTemplate.getForEntity("/auth/me", Object.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-    }
+    // ── POST /auth/password/forgot ─────────────────────────────────────────────
 
-    // ── blocked user ──────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("POST /auth/password/forgot")
+    class ForgotPassword {
 
-    @Test
-    @DisplayName("POST /auth/login: пользователь в статусе BLOCKED → 401")
-    void login_blockedUser_shouldReturn401() {
-        restTemplate.postForEntity("/auth/register",
-                new RegisterRequest("blocked@example.com", "password123"), Object.class);
+        @Test
+        @DisplayName("существующий email → 200 (не раскрывает факт существования)")
+        void existingEmail_shouldReturn200() {
+            String email = "forgot_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
 
-        userRepository.findByEmailAndDeletedFalse("blocked@example.com").ifPresent(user -> {
-            user.setStatus(UserStatus.BLOCKED);
-            userRepository.save(user);
-        });
+            var response = restTemplate.postForEntity("/auth/password/forgot",
+                    new ForgotPasswordRequest(email), Object.class);
 
-        var response = restTemplate.postForEntity("/auth/login",
-                new LoginRequest("blocked@example.com", "password123"), Object.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        @Test
+        @DisplayName("несуществующий email → тоже 200 (безопасность: не раскрываем наличие email)")
+        void nonExistingEmail_shouldReturn200ToNotLeakInfo() {
+            var response = restTemplate.postForEntity("/auth/password/forgot",
+                    new ForgotPasswordRequest("ghost_" + UUID.randomUUID() + "@example.com"), Object.class);
+
+            assertThat(response.getStatusCode())
+                    .as("Несуществующий email должен давать 200, чтобы не раскрывать факт существования аккаунта")
+                    .isEqualTo(HttpStatus.OK);
+        }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

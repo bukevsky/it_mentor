@@ -5,6 +5,8 @@ import com.example.it.mentor.entity.User;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.AuthMapper;
 import com.example.it.mentor.repository.UserRepository;
+
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final AuthMapper authMapper;
+    private final FileStorage fileStorage;
 
     @Transactional(readOnly = true)
     public User findByEmail(String email) {
@@ -29,13 +32,22 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public java.util.Optional<User> findByEmailOptional(String email) {
+    public Optional<User> findByEmailOptional(String email) {
         return userRepository.findByEmailAndDeletedFalse(email);
     }
 
     @Transactional
     public User save(User user) {
         return userRepository.save(user);
+    }
+
+    @Transactional
+    public void linkAvatar(Long userId, Long fileId) {
+        fileStorage.requireOwned(fileId, userId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
+        user.setAvatarFileId(fileId);
+        userRepository.save(user);
     }
 
     @Transactional(readOnly = true)

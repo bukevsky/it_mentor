@@ -5,6 +5,7 @@ import com.example.it.mentor.dto.dict.InteractionTypeResponse;
 import com.example.it.mentor.dto.dict.LanguageResponse;
 import com.example.it.mentor.dto.dict.SkillResponse;
 import com.example.it.mentor.service.DictionaryService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,6 +16,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/dictionaries")
 @RequiredArgsConstructor
+@Tag(name = "Dictionaries", description = "Справочники")
 public class DictionaryController {
 
     private final DictionaryService dictionaryService;
