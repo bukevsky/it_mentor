@@ -15,6 +15,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 import static org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE;
 
+/**
+ * REST-контроллер для загрузки файлов пользователей.
+ *
+ * <p>Все эндпоинты требуют аутентификации. Файлы сохраняются в MinIO через
+ * {@link com.example.it.mentor.service.FileStorage}. Валидация типа и размера
+ * файла делегируется {@link com.example.it.mentor.entity.enums.FileType#validate}.</p>
+ */
 @RestController
 @RequestMapping("/files")
 @RequiredArgsConstructor
@@ -25,6 +32,16 @@ public class FileController {
     private final UserService userService;
     private final StudentProfileService studentProfileService;
 
+    /**
+     * Загружает резюме студента.
+     *
+     * <p>Требует наличия профиля студента — при его отсутствии выбрасывается
+     * {@link com.example.it.mentor.exception.BusinessRuleViolationException}.
+     * После сохранения файл автоматически привязывается к профилю студента.</p>
+     *
+     * @param file файл резюме (PDF, макс. 5 МБ)
+     * @return метаданные загруженного файла
+     */
     @PostMapping(value = "/resume", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadResume(@RequestParam("file") MultipartFile file) {
@@ -35,6 +52,12 @@ public class FileController {
         return response;
     }
 
+    /**
+     * Загружает файл портфолио текущего пользователя.
+     *
+     * @param file файл портфолио
+     * @return метаданные загруженного файла
+     */
     @PostMapping(value = "/portfolio", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadPortfolio(@RequestParam("file") MultipartFile file) {
@@ -42,6 +65,14 @@ public class FileController {
         return fileStorage.store(file, FileType.PORTFOLIO, user.getId());
     }
 
+    /**
+     * Загружает аватар текущего пользователя.
+     *
+     * <p>После сохранения файл автоматически привязывается к записи пользователя.</p>
+     *
+     * @param file изображение аватара (JPEG/PNG, макс. 2 МБ)
+     * @return метаданные загруженного файла
+     */
     @PostMapping(value = "/avatar", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadAvatar(@RequestParam("file") MultipartFile file) {
