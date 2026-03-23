@@ -12,6 +12,12 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 
+/**
+ * Обработчик отказа в доступе для аутентифицированного пользователя без нужных прав.
+ *
+ * <p>Возвращает HTTP 403 с JSON-телом {@link com.example.it.mentor.dto.ErrorResponse}
+ * вместо стандартного HTML-ответа Spring Security.</p>
+ */
 @Component
 @RequiredArgsConstructor
 public class Http403AccessDeniedHandler implements AccessDeniedHandler {

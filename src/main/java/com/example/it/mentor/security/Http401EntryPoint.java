@@ -12,6 +12,12 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 
+/**
+ * Обработчик попытки доступа к защищённому ресурсу без аутентификации.
+ *
+ * <p>Возвращает HTTP 401 с JSON-телом {@link com.example.it.mentor.dto.ErrorResponse}
+ * вместо стандартного HTML-ответа Spring Security.</p>
+ */
 @Component
 @RequiredArgsConstructor
 public class Http401EntryPoint implements AuthenticationEntryPoint {

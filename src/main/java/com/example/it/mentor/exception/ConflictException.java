@@ -2,6 +2,9 @@ package com.example.it.mentor.exception;
 
 import org.springframework.http.HttpStatus;
 
+/**
+ * Исключение для конфликтов данных, например при попытке создать дубликат (HTTP 409).
+ */
 public class ConflictException extends ApiException {
 
     public ConflictException(String message) {

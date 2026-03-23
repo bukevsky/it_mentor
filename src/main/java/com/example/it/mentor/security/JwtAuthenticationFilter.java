@@ -16,6 +16,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
+/**
+ * Фильтр аутентификации по JWT-токену.
+ *
+ * <p>На каждый входящий запрос извлекает Bearer-токен из заголовка {@code Authorization},
+ * валидирует его через {@link JwtProvider} и, если токен корректен, устанавливает
+ * аутентификацию в {@link org.springframework.security.core.context.SecurityContext}.
+ * При ошибке обработки токена запрос продолжается без аутентификации.</p>
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor

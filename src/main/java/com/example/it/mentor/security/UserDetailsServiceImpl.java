@@ -12,12 +12,25 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Реализация {@link UserDetailsService} для загрузки пользователей из базы данных.
+ *
+ * <p>Используется Spring Security при аутентификации. Ищет активных (не удалённых)
+ * пользователей по email и формирует список прав доступа на основе ролей.</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class UserDetailsServiceImpl implements UserDetailsService {
 
     private final UserRepository userRepository;
 
+    /**
+     * Загружает пользователя по email для последующей аутентификации.
+     *
+     * @param email адрес электронной почты (используется как username)
+     * @return объект {@link UserDetails} с ролями в формате {@code ROLE_<CODE>}
+     * @throws UsernameNotFoundException если пользователь не найден или удалён
+     */
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
