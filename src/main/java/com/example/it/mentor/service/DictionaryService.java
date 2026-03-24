@@ -10,6 +10,7 @@ import com.example.it.mentor.repository.DictInteractionTypeRepository;
 import com.example.it.mentor.repository.DictLanguageRepository;
 import com.example.it.mentor.repository.DictSkillRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,18 +27,22 @@ public class DictionaryService {
     private final DictInteractionTypeRepository interactionTypeRepository;
     private final DictionaryMapper dictionaryMapper;
 
+    @Cacheable(value = "dictionaries", key = "'cities'")
     public List<CityResponse> getCities() {
         return dictionaryMapper.toCityResponses(cityRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    @Cacheable(value = "dictionaries", key = "'skills'")
     public List<SkillResponse> getSkills() {
         return dictionaryMapper.toSkillResponses(skillRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    @Cacheable(value = "dictionaries", key = "'languages'")
     public List<LanguageResponse> getLanguages() {
         return dictionaryMapper.toLanguageResponses(languageRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    @Cacheable(value = "dictionaries", key = "'interactionTypes'")
     public List<InteractionTypeResponse> getInteractionTypes() {
         return dictionaryMapper.toInteractionTypeResponses(interactionTypeRepository.findByActiveTrueOrderByNameAsc());
     }

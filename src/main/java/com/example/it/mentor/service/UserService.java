@@ -5,6 +5,7 @@ import com.example.it.mentor.entity.User;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.AuthMapper;
 import com.example.it.mentor.repository.UserRepository;
+import com.example.it.mentor.security.UserDetailsServiceImpl;
 
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -19,11 +20,12 @@ public class UserService {
     private final UserRepository userRepository;
     private final AuthMapper authMapper;
     private final FileStorage fileStorage;
+    private final UserDetailsServiceImpl userDetailsService;
 
     @Transactional(readOnly = true)
     public User findByEmail(String email) {
         return userRepository.findByEmailAndDeletedFalse(email)
-                .orElseThrow(() -> new NotFoundException("Пользователь не найден: " + email));
+                .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
     }
 
     @Transactional(readOnly = true)
@@ -38,7 +40,9 @@ public class UserService {
 
     @Transactional
     public User save(User user) {
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        userDetailsService.evictUserCache(saved.getEmail());
+        return saved;
     }
 
     @Transactional
@@ -47,12 +51,25 @@ public class UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
         user.setAvatarFileId(fileId);
-        userRepository.save(user);
+        save(user);
     }
 
     @Transactional(readOnly = true)
     public UserInfoResponse getCurrentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        String email = currentEmail();
         return authMapper.toUserInfoResponse(findByEmail(email));
+    }
+
+    /**
+     * Возвращает сущность текущего аутентифицированного пользователя.
+     * Централизованный метод для устранения дублирования SecurityContextHolder во всех сервисах.
+     */
+    @Transactional(readOnly = true)
+    public User getCurrentUserEntity() {
+        return findByEmail(currentEmail());
+    }
+
+    private String currentEmail() {
+        return SecurityContextHolder.getContext().getAuthentication().getName();
     }
 }

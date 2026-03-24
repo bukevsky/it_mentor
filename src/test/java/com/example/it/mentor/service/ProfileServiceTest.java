@@ -61,7 +61,7 @@ class ProfileServiceTest {
             StudentProfile profile = StudentProfile.builder().user(user).build();
             ReflectionTestUtils.setField(profile, "id", 10L);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
             when(studentProfileRepository.findByUserId(any())).thenReturn(Optional.of(profile));
 
             ProfileSummaryResponse result = service.getProfileSummary();
@@ -77,7 +77,7 @@ class ProfileServiceTest {
         void studentWithoutProfile_shouldReturnNoProfile() {
             User user = userWithRole(RoleCode.STUDENT);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
             when(studentProfileRepository.findByUserId(any())).thenReturn(Optional.empty());
 
             ProfileSummaryResponse result = service.getProfileSummary();
@@ -94,7 +94,7 @@ class ProfileServiceTest {
             MentorProfile profile = MentorProfile.builder().user(user).build();
             ReflectionTestUtils.setField(profile, "id", 20L);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
             when(mentorProfileRepository.findByUserId(any())).thenReturn(Optional.of(profile));
 
             ProfileSummaryResponse result = service.getProfileSummary();
@@ -110,7 +110,7 @@ class ProfileServiceTest {
         void mentorWithoutProfile_shouldReturnNoProfile() {
             User user = userWithRole(RoleCode.MENTOR);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
             when(mentorProfileRepository.findByUserId(any())).thenReturn(Optional.empty());
 
             ProfileSummaryResponse result = service.getProfileSummary();
@@ -125,7 +125,7 @@ class ProfileServiceTest {
         void admin_shouldReturnAdminWithNoProfile() {
             User user = userWithRole(RoleCode.ADMIN);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
 
             ProfileSummaryResponse result = service.getProfileSummary();
 
@@ -139,7 +139,7 @@ class ProfileServiceTest {
         void noRoles_shouldDefaultToStudent() {
             User user = User.builder().email(TEST_EMAIL).build();
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(user);
+            when(userService.getCurrentUserEntity()).thenReturn(user);
             when(studentProfileRepository.findByUserId(any())).thenReturn(Optional.empty());
 
             ProfileSummaryResponse result = service.getProfileSummary();

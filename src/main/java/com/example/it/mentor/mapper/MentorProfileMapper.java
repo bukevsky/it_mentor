@@ -1,5 +1,6 @@
 package com.example.it.mentor.mapper;
 
+import com.example.it.mentor.dto.mentor.MentorCardResponse;
 import com.example.it.mentor.dto.mentor.MentorProfileResponse;
 import com.example.it.mentor.dto.mentor.MentorSkillResponse;
 import com.example.it.mentor.entity.MentorProfile;
@@ -14,14 +15,12 @@ import java.util.Set;
 public interface MentorProfileMapper {
 
     @Mapping(target = "userId", source = "user.id")
-    @Mapping(target = "mentoringType", source = "mentoringType")
-    @Mapping(target = "mentoringChannel", source = "mentoringChannel")
-    @Mapping(target = "mentoringDuration", source = "mentoringDuration")
-    @Mapping(target = "recruitmentStatus", source = "recruitmentStatus")
     MentorProfileResponse toResponse(MentorProfile profile);
 
-    @Mapping(target = "level", source = "level")
     MentorSkillResponse toSkillResponse(MentorSkill skill);
 
     List<MentorSkillResponse> toSkillResponses(Set<MentorSkill> skills);
+
+    @Mapping(target = "userId", source = "user.id")
+    MentorCardResponse toCardResponse(MentorProfile profile);
 }

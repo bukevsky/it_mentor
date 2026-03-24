@@ -34,6 +34,9 @@ import java.util.Set;
 )
 public class StudentProfile extends BaseEntity {
 
+    @Version
+    private Long version;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;

@@ -29,6 +29,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("StudentProfileService")
@@ -77,7 +78,7 @@ class StudentProfileServiceTest {
             StudentProfile newProfile = StudentProfile.builder().user(testUser).firstName("Иван").lastName("Иванов").build();
             StudentProfileResponse expectedResponse = mockResponse(1L, "Иван", "Иванов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(newProfile);
             when(profileRepository.findWithDetailsById(any())).thenReturn(Optional.of(newProfile));
@@ -92,6 +93,7 @@ class StudentProfileServiceTest {
                     .isNotNull();
             assertThat(result.firstName()).isEqualTo("Иван");
             assertThat(result.lastName()).isEqualTo("Иванов");
+            // save вызывается дважды: для получения ID (новый профиль) и после замены коллекций
             verify(profileRepository, times(2)).save(any(StudentProfile.class));
         }
 
@@ -100,10 +102,11 @@ class StudentProfileServiceTest {
         void existingProfile_shouldUpdateFields() {
             // Arrange
             StudentProfile existing = StudentProfile.builder().user(testUser).firstName("Старое").lastName("Имя").build();
+            ReflectionTestUtils.setField(existing, "id", 1L);
             StudentProfileRequest request = minimalRequest("Новое", "Имя");
             StudentProfileResponse updatedResponse = mockResponse(1L, "Новое", "Имя");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.of(existing));
             when(profileRepository.save(any())).thenReturn(existing);
             when(profileRepository.findWithDetailsById(any())).thenReturn(Optional.of(existing));
@@ -114,8 +117,7 @@ class StudentProfileServiceTest {
 
             // Assert
             assertThat(result.firstName()).as("firstName должен обновиться").isEqualTo("Новое");
-            // save вызывается дважды: до замены коллекций и после
-            verify(profileRepository, times(2)).save(existing);
+            verify(profileRepository).save(existing);
         }
 
         @Test
@@ -125,7 +127,7 @@ class StudentProfileServiceTest {
             StudentProfileRequest request = requestWithCity("Алина", "Иванова", 1L);
             StudentProfile profile = StudentProfile.builder().user(testUser).build();
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(cityRepository.findById(1L)).thenReturn(Optional.empty());
 
@@ -142,10 +144,10 @@ class StudentProfileServiceTest {
             StudentProfileRequest request = requestWithLanguage("Иван", "Иванов", 99L);
             StudentProfile profile = StudentProfile.builder().user(testUser).build();
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(profile);
-            when(languageRefRepository.findById(99L)).thenReturn(Optional.empty());
+            when(languageRefRepository.findAllById(List.of(99L))).thenReturn(List.of());
 
             // Act + Assert
             assertThatThrownBy(() -> service.upsertProfile(request))
@@ -166,7 +168,7 @@ class StudentProfileServiceTest {
             StudentProfileResponse response = mockResponse(1L, "Иван", "Иванов");
 
             // Возвращаем существующий profile из репозитория, чтобы сервис модифицировал именно его
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.of(profile));
             when(profileRepository.save(any())).thenReturn(profile);
             when(profileRepository.findWithDetailsById(any())).thenReturn(Optional.of(profile));
@@ -190,7 +192,7 @@ class StudentProfileServiceTest {
             StudentProfile profile = StudentProfile.builder().user(testUser).build();
             StudentProfileResponse response = mockResponse(1L, "Иван", "Иванов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(profile);
             when(profileRepository.findWithDetailsById(any())).thenReturn(Optional.of(profile));
@@ -217,7 +219,7 @@ class StudentProfileServiceTest {
             StudentProfile profile = StudentProfile.builder().user(testUser).firstName("Анна").build();
             StudentProfileResponse response = mockResponse(1L, "Анна", "Иванова");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(profile));
             when(mapper.toResponse(profile)).thenReturn(response);
 
@@ -234,7 +236,7 @@ class StudentProfileServiceTest {
         @DisplayName("профиль не найден — бросает NotFoundException с нужным сообщением")
         void profileNotFound_shouldThrowNotFoundException() {
             // Arrange
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.empty());
 
             // Act + Assert
@@ -247,8 +249,8 @@ class StudentProfileServiceTest {
         @DisplayName("пользователь не найден — пробрасывает NotFoundException от UserService")
         void userNotFound_shouldPropagateNotFoundException() {
             // Arrange
-            when(userService.findByEmail(TEST_EMAIL))
-                    .thenThrow(new NotFoundException("Пользователь не найден: " + TEST_EMAIL));
+            when(userService.getCurrentUserEntity())
+                    .thenThrow(new NotFoundException("Пользователь не найден"));
 
             // Act + Assert
             assertThatThrownBy(() -> service.getMyProfile())

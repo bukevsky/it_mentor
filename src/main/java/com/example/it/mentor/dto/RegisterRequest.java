@@ -2,6 +2,7 @@ package com.example.it.mentor.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record RegisterRequest(
@@ -11,7 +12,9 @@ public record RegisterRequest(
         String email,
 
         @NotBlank(message = "Пароль обязателен")
-        @Size(min = 8, message = "Пароль должен содержать не менее 8 символов")
+        @Size(min = 8, max = 128, message = "Пароль должен содержать от 8 до 128 символов")
+        @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).*$",
+                message = "Пароль должен содержать минимум одну заглавную букву, одну строчную и одну цифру")
         String password,
 
         @NotBlank(message = "Имя обязательно")

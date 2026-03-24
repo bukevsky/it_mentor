@@ -17,6 +17,8 @@ spring:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
 app:
+  jwt:
+    secret: ${JWT_SECRET:dev-secret-key-must-be-at-least-32-characters-long}
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY:minioadmin}

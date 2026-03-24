@@ -325,9 +325,9 @@ class MentorProfileControllerIT {
     private String registerAndLogin() {
         String email = "it_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
         restTemplate.postForEntity("/auth/register",
-                new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
         ResponseEntity<LoginResponse> loginResponse = restTemplate.postForEntity(
-                "/auth/login", new LoginRequest(email, "password123"), LoginResponse.class);
+                "/auth/login", new LoginRequest(email, "Password123"), LoginResponse.class);
         return loginResponse.getBody().accessToken();
     }
 

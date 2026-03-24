@@ -9,7 +9,6 @@ import com.example.it.mentor.service.UserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -45,7 +44,7 @@ public class FileController {
     @PostMapping(value = "/resume", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadResume(@RequestParam("file") MultipartFile file) {
-        User user = currentUser();
+        User user = userService.getCurrentUserEntity();
         studentProfileService.requireStudentProfile(user.getId());
         FileUploadResponse response = fileStorage.store(file, FileType.RESUME, user.getId());
         studentProfileService.linkResume(user.getId(), response.id());
@@ -61,7 +60,7 @@ public class FileController {
     @PostMapping(value = "/portfolio", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadPortfolio(@RequestParam("file") MultipartFile file) {
-        User user = currentUser();
+        User user = userService.getCurrentUserEntity();
         return fileStorage.store(file, FileType.PORTFOLIO, user.getId());
     }
 
@@ -76,14 +75,9 @@ public class FileController {
     @PostMapping(value = "/avatar", consumes = MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public FileUploadResponse uploadAvatar(@RequestParam("file") MultipartFile file) {
-        User user = currentUser();
+        User user = userService.getCurrentUserEntity();
         FileUploadResponse response = fileStorage.store(file, FileType.AVATAR, user.getId());
         userService.linkAvatar(user.getId(), response.id());
         return response;
-    }
-
-    private User currentUser() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        return userService.findByEmail(email);
     }
 }

@@ -12,6 +12,7 @@ import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.security.JwtProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,7 +52,12 @@ public class AuthService {
                 .roles(Set.of(studentRole))
                 .build();
 
-        User saved = userService.save(user);
+        User saved;
+        try {
+            saved = userService.save(user);
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictException("Email уже зарегистрирован");
+        }
 
         StudentProfile profile = StudentProfile.builder()
                 .user(saved)
@@ -102,29 +108,24 @@ public class AuthService {
                     .build();
             passwordResetTokenRepository.save(resetToken);
             log.info("Создан токен сброса пароля для: {}", email);
-            // TODO: отправить email с токеном (Stage 2)
+            // TODO: отправить email с токеном
         });
     }
 
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
+        int updated = passwordResetTokenRepository.markTokenUsed(request.token(), OffsetDateTime.now());
+        if (updated == 0) {
+            throw new UnauthorizedException("Недействительный или уже использованный токен сброса пароля");
+        }
+
         PasswordResetToken resetToken = passwordResetTokenRepository
                 .findByToken(request.token())
                 .orElseThrow(() -> new UnauthorizedException("Недействительный токен сброса пароля"));
 
-        if (resetToken.isUsed()) {
-            throw new UnauthorizedException("Токен уже был использован");
-        }
-        if (resetToken.isExpired()) {
-            throw new UnauthorizedException("Токен истёк");
-        }
-
         User user = resetToken.getUser();
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userService.save(user);
-
-        resetToken.setUsed(true);
-        passwordResetTokenRepository.save(resetToken);
         log.info("Пароль успешно сброшен для пользователя: {}", user.getEmail());
     }
 }

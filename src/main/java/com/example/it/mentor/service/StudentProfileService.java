@@ -2,11 +2,14 @@ package com.example.it.mentor.service;
 
 import com.example.it.mentor.dto.student.StudentProfileRequest;
 import com.example.it.mentor.dto.student.StudentProfileResponse;
+import com.example.it.mentor.entity.BaseEntity;
 import com.example.it.mentor.entity.StudentEducation;
 import com.example.it.mentor.entity.StudentLanguage;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.StudentSkill;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.entity.dict.DictLanguage;
+import com.example.it.mentor.entity.dict.DictSkill;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.StudentProfileMapper;
 import com.example.it.mentor.repository.DictCityRepository;
@@ -17,11 +20,13 @@ import com.example.it.mentor.repository.StudentLanguageRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.repository.StudentSkillRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,8 +46,7 @@ public class StudentProfileService {
 
     @Transactional(readOnly = true)
     public StudentProfileResponse getMyProfile() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User user = userService.findByEmail(email);
+        User user = userService.getCurrentUserEntity();
         StudentProfile profile = profileRepository.findWithDetailsByUserId(user.getId())
                 .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
         return mapper.toResponse(profile);
@@ -50,8 +54,7 @@ public class StudentProfileService {
 
     @Transactional
     public StudentProfileResponse upsertProfile(StudentProfileRequest request) {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User user = userService.findByEmail(email);
+        User user = userService.getCurrentUserEntity();
 
         StudentProfile profile = profileRepository.findByUserId(user.getId())
                 .orElseGet(() -> StudentProfile.builder().user(user).build());
@@ -82,7 +85,10 @@ public class StudentProfileService {
             profile.getWorkFormats().addAll(request.workFormats());
         }
 
-        profile = profileRepository.save(profile);
+        // Для новых профилей нужен первый save для получения ID
+        if (profile.getId() == null) {
+            profile = profileRepository.save(profile);
+        }
 
         replaceEducations(profile, request);
         replaceLanguages(profile, request);
@@ -139,13 +145,25 @@ public class StudentProfileService {
         languageRepository.deleteAllByStudentProfile(profile);
         profile.getLanguages().clear();
         if (request.languages() == null) return;
+
+        List<Long> langIds = request.languages().stream()
+                .map(req -> req.languageId())
+                .toList();
+        Map<Long, DictLanguage> langMap = languageRefRepository.findAllById(langIds).stream()
+                .collect(Collectors.toMap(BaseEntity::getId, Function.identity()));
+
         Set<StudentLanguage> newLanguages = request.languages().stream()
-                .map(req -> StudentLanguage.builder()
-                        .studentProfile(profile)
-                        .language(languageRefRepository.findById(req.languageId())
-                                .orElseThrow(() -> new NotFoundException("Язык не найден: " + req.languageId())))
-                        .level(req.level())
-                        .build())
+                .map(req -> {
+                    DictLanguage lang = langMap.get(req.languageId());
+                    if (lang == null) {
+                        throw new NotFoundException("Язык не найден: " + req.languageId());
+                    }
+                    return StudentLanguage.builder()
+                            .studentProfile(profile)
+                            .language(lang)
+                            .level(req.level())
+                            .build();
+                })
                 .collect(Collectors.toSet());
         profile.getLanguages().addAll(newLanguages);
     }
@@ -154,13 +172,25 @@ public class StudentProfileService {
         skillRepository.deleteAllByStudentProfile(profile);
         profile.getSkills().clear();
         if (request.skills() == null) return;
+
+        List<Long> skillIds = request.skills().stream()
+                .map(req -> req.skillId())
+                .toList();
+        Map<Long, DictSkill> skillMap = skillRefRepository.findAllById(skillIds).stream()
+                .collect(Collectors.toMap(BaseEntity::getId, Function.identity()));
+
         Set<StudentSkill> newSkills = request.skills().stream()
-                .map(req -> StudentSkill.builder()
-                        .studentProfile(profile)
-                        .skill(skillRefRepository.findById(req.skillId())
-                                .orElseThrow(() -> new NotFoundException("Навык не найден: " + req.skillId())))
-                        .level(req.level())
-                        .build())
+                .map(req -> {
+                    DictSkill skill = skillMap.get(req.skillId());
+                    if (skill == null) {
+                        throw new NotFoundException("Навык не найден: " + req.skillId());
+                    }
+                    return StudentSkill.builder()
+                            .studentProfile(profile)
+                            .skill(skill)
+                            .level(req.level())
+                            .build();
+                })
                 .collect(Collectors.toSet());
         profile.getSkills().addAll(newSkills);
     }
