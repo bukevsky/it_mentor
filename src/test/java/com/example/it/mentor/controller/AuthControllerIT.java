@@ -40,7 +40,7 @@ class AuthControllerIT {
         @Test
         @DisplayName("новый пользователь → 201, email в нижнем регистре, роль STUDENT")
         void newUser_shouldReturn201WithStudentRole() {
-            var request = new RegisterRequest("New_IT@Example.com", "password123", "Иван", "Иванов");
+            var request = new RegisterRequest("New_IT@Example.com", "Password123", "Иван", "Иванов");
 
             var response = restTemplate.postForEntity("/auth/register", request, RegisterResponse.class);
 
@@ -62,7 +62,7 @@ class AuthControllerIT {
         @DisplayName("email в верхнем регистре → сохраняется в нижнем (нормализация)")
         void uppercaseEmail_shouldBeNormalizedToLowercase() {
             String uniqueEmail = "UPPER_" + UUID.randomUUID().toString().substring(0, 8) + "@EXAMPLE.COM";
-            var request = new RegisterRequest(uniqueEmail, "password123", "Анна", "Петрова");
+            var request = new RegisterRequest(uniqueEmail, "Password123", "Анна", "Петрова");
 
             var response = restTemplate.postForEntity("/auth/register", request, RegisterResponse.class);
 
@@ -73,7 +73,7 @@ class AuthControllerIT {
         @Test
         @DisplayName("дубликат email → 409 Conflict")
         void duplicateEmail_shouldReturn409() {
-            var request = new RegisterRequest("duplicate@example.com", "password123", "Иван", "Иванов");
+            var request = new RegisterRequest("duplicate@example.com", "Password123", "Иван", "Иванов");
             restTemplate.postForEntity("/auth/register", request, Object.class);
 
             var response = restTemplate.postForEntity("/auth/register", request, Object.class);
@@ -86,11 +86,11 @@ class AuthControllerIT {
         void duplicateEmailDifferentCase_shouldReturn409() {
             String email = "casedup_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             // Тот же email, но в верхнем регистре
             var response = restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email.toUpperCase(), "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email.toUpperCase(), "Password123", "Иван", "Иванов"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         }
@@ -98,7 +98,7 @@ class AuthControllerIT {
         @Test
         @DisplayName("пустой firstName → 400 Bad Request")
         void blankFirstName_shouldReturn400() {
-            var request = new RegisterRequest("valid@example.com", "password123", "", "Иванов");
+            var request = new RegisterRequest("valid@example.com", "Password123", "", "Иванов");
 
             var response = restTemplate.postForEntity("/auth/register", request, Object.class);
 
@@ -108,7 +108,7 @@ class AuthControllerIT {
         @Test
         @DisplayName("пустой lastName → 400 Bad Request")
         void blankLastName_shouldReturn400() {
-            var request = new RegisterRequest("valid2@example.com", "password123", "Иван", "");
+            var request = new RegisterRequest("valid2@example.com", "Password123", "Иван", "");
 
             var response = restTemplate.postForEntity("/auth/register", request, Object.class);
 
@@ -127,10 +127,10 @@ class AuthControllerIT {
         void validCredentials_shouldReturn200WithToken() {
             String email = "login_ok_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             var response = restTemplate.postForEntity("/auth/login",
-                    new LoginRequest(email, "password123"), LoginResponse.class);
+                    new LoginRequest(email, "Password123"), LoginResponse.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             assertThat(response.getBody()).isNotNull();
@@ -147,7 +147,7 @@ class AuthControllerIT {
         void wrongPassword_shouldReturn401() {
             String email = "login_bad_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             var response = restTemplate.postForEntity("/auth/login",
                     new LoginRequest(email, "wrongpassword"), Object.class);
@@ -171,10 +171,10 @@ class AuthControllerIT {
         void uppercaseEmail_shouldLoginSuccessfully() {
             String email = "case_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             var response = restTemplate.postForEntity("/auth/login",
-                    new LoginRequest(email.toUpperCase(), "password123"), LoginResponse.class);
+                    new LoginRequest(email.toUpperCase(), "Password123"), LoginResponse.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
@@ -184,7 +184,7 @@ class AuthControllerIT {
         void blockedUser_shouldReturn401() {
             String email = "blocked_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             userRepository.findByEmailAndDeletedFalse(email).ifPresent(user -> {
                 user.setStatus(UserStatus.BLOCKED);
@@ -192,7 +192,7 @@ class AuthControllerIT {
             });
 
             var response = restTemplate.postForEntity("/auth/login",
-                    new LoginRequest(email, "password123"), Object.class);
+                    new LoginRequest(email, "Password123"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
@@ -209,9 +209,9 @@ class AuthControllerIT {
         void validToken_shouldReturn200WithUserInfo() {
             String email = "me_ok_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
             var loginResponse = restTemplate.postForEntity("/auth/login",
-                    new LoginRequest(email, "password123"), LoginResponse.class);
+                    new LoginRequest(email, "Password123"), LoginResponse.class);
             String token = loginResponse.getBody().accessToken();
 
             var response = restTemplate.exchange("/auth/me", HttpMethod.GET,
@@ -257,7 +257,7 @@ class AuthControllerIT {
         void existingEmail_shouldReturn200() {
             String email = "forgot_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
             restTemplate.postForEntity("/auth/register",
-                    new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
 
             var response = restTemplate.postForEntity("/auth/password/forgot",
                     new ForgotPasswordRequest(email), Object.class);

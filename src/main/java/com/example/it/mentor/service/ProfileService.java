@@ -7,7 +7,6 @@ import com.example.it.mentor.entity.User;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,8 +20,7 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public ProfileSummaryResponse getProfileSummary() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User user = userService.findByEmail(email);
+        User user = userService.getCurrentUserEntity();
 
         RoleCode role = resolveRole(user);
         String roleName = role.name();

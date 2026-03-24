@@ -27,8 +27,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.assertj.core.api.AssertionsForClassTypes.catchThrowable;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -343,8 +342,8 @@ class AuthServiceTest {
     class ResetPassword {
 
         @Test
-        @DisplayName("валидный токен → пароль обновляется, токен помечается как использованный")
-        void validToken_shouldUpdatePasswordAndMarkUsed() {
+        @DisplayName("валидный токен → пароль обновляется атомарно")
+        void validToken_shouldUpdatePasswordAtomically() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             var resetToken = PasswordResetToken.builder()
                     .token("valid-uuid-token")
@@ -353,6 +352,8 @@ class AuthServiceTest {
                     .used(false)
                     .build();
 
+            when(passwordResetTokenRepository.markTokenUsed(eq("valid-uuid-token"), any(OffsetDateTime.class)))
+                    .thenReturn(1);
             when(passwordResetTokenRepository.findByToken("valid-uuid-token"))
                     .thenReturn(Optional.of(resetToken));
             when(passwordEncoder.encode("newPassword123")).thenReturn("$2a$new_hashed");
@@ -363,64 +364,19 @@ class AuthServiceTest {
             assertThat(user.getPasswordHash())
                     .as("Пароль пользователя должен обновиться")
                     .isEqualTo("$2a$new_hashed");
-            assertThat(resetToken.isUsed())
-                    .as("Токен должен быть помечен как использованный")
-                    .isTrue();
-            verify(passwordResetTokenRepository).save(resetToken);
+            verify(passwordResetTokenRepository).markTokenUsed(eq("valid-uuid-token"), any(OffsetDateTime.class));
         }
 
         @Test
-        @DisplayName("токен не найден → UnauthorizedException")
-        void tokenNotFound_shouldThrowUnauthorized() {
-            when(passwordResetTokenRepository.findByToken("non-existent-token"))
-                    .thenReturn(Optional.empty());
+        @DisplayName("недействительный/использованный/истёкший токен → UnauthorizedException")
+        void invalidToken_shouldThrowUnauthorized() {
+            when(passwordResetTokenRepository.markTokenUsed(eq("bad-token"), any(OffsetDateTime.class)))
+                    .thenReturn(0);
 
             assertThatThrownBy(() ->
-                    authService.resetPassword(new ResetPasswordRequest("non-existent-token", "newPass")))
+                    authService.resetPassword(new ResetPasswordRequest("bad-token", "newPass")))
                     .isInstanceOf(UnauthorizedException.class)
-                    .hasMessageContaining("Недействительный токен");
-        }
-
-        @Test
-        @DisplayName("токен уже использован → UnauthorizedException")
-        void tokenAlreadyUsed_shouldThrowUnauthorized() {
-            var user = buildUser("user@example.com", UserStatus.ACTIVE);
-            var usedToken = PasswordResetToken.builder()
-                    .token("used-token")
-                    .user(user)
-                    .expiresAt(OffsetDateTime.now().plusHours(1))
-                    .used(true)
-                    .build();
-
-            when(passwordResetTokenRepository.findByToken("used-token"))
-                    .thenReturn(Optional.of(usedToken));
-
-            assertThatThrownBy(() ->
-                    authService.resetPassword(new ResetPasswordRequest("used-token", "newPass")))
-                    .isInstanceOf(UnauthorizedException.class)
-                    .hasMessageContaining("Токен уже был использован");
-
-            verify(userService, never()).save(any());
-        }
-
-        @Test
-        @DisplayName("токен истёк → UnauthorizedException, пароль не меняется")
-        void expiredToken_shouldThrowUnauthorized() {
-            var user = buildUser("user@example.com", UserStatus.ACTIVE);
-            var expiredToken = PasswordResetToken.builder()
-                    .token("expired-token")
-                    .user(user)
-                    .expiresAt(OffsetDateTime.now().minusHours(1)) // уже истёк
-                    .used(false)
-                    .build();
-
-            when(passwordResetTokenRepository.findByToken("expired-token"))
-                    .thenReturn(Optional.of(expiredToken));
-
-            assertThatThrownBy(() ->
-                    authService.resetPassword(new ResetPasswordRequest("expired-token", "newPass")))
-                    .isInstanceOf(UnauthorizedException.class)
-                    .hasMessageContaining("Токен истёк");
+                    .hasMessageContaining("Недействительный или уже использованный токен");
 
             verify(userService, never()).save(any());
         }

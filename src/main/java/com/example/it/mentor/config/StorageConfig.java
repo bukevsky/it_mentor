@@ -38,7 +38,8 @@ public class StorageConfig {
                     log.info("MinIO bucket '{}' создан", props.getBucketName());
                 }
             } catch (Exception e) {
-                log.error("Не удалось создать MinIO bucket '{}': {}", props.getBucketName(), e.getMessage(), e);
+                log.warn("Не удалось проверить/создать MinIO bucket '{}': {}. Загрузка файлов может не работать.",
+                        props.getBucketName(), e.getMessage());
             }
         };
     }

@@ -63,7 +63,8 @@ class FileControllerIT {
             String token = registerAndLogin();
 
             ResponseEntity<FileUploadResponse> response = uploadFile(
-                    "/files/resume", "resume.pdf", "application/pdf", new byte[1024], token);
+                    "/files/resume", "resume.pdf", "application/pdf",
+                    validContent("application/pdf"), token);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
             assertThat(response.getBody()).isNotNull();
@@ -135,7 +136,7 @@ class FileControllerIT {
             String token = registerAndLogin();
 
             ResponseEntity<FileUploadResponse> response = uploadFile(
-                    "/files/portfolio", filename, contentType, new byte[1024], token);
+                    "/files/portfolio", filename, contentType, validContent(contentType), token);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
             assertThat(response.getBody().fileType()).isEqualTo(FileType.PORTFOLIO);
@@ -185,7 +186,7 @@ class FileControllerIT {
             String token = registerAndLogin();
 
             ResponseEntity<FileUploadResponse> response = uploadFile(
-                    "/files/avatar", filename, contentType, new byte[1024], token);
+                    "/files/avatar", filename, contentType, validContent(contentType), token);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
             assertThat(response.getBody()).isNotNull();
@@ -231,9 +232,9 @@ class FileControllerIT {
             String token = registerAndLogin();
 
             ResponseEntity<FileUploadResponse> first = uploadFile(
-                    "/files/avatar", "avatar1.jpg", "image/jpeg", new byte[1024], token);
+                    "/files/avatar", "avatar1.jpg", "image/jpeg", validContent("image/jpeg"), token);
             ResponseEntity<FileUploadResponse> second = uploadFile(
-                    "/files/avatar", "avatar2.png", "image/png", new byte[2048], token);
+                    "/files/avatar", "avatar2.png", "image/png", validContent("image/png"), token);
 
             assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
             assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CREATED);
@@ -248,10 +249,35 @@ class FileControllerIT {
     private String registerAndLogin() {
         String email = "file_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
         restTemplate.postForEntity("/auth/register",
-                new RegisterRequest(email, "password123", "Иван", "Иванов"), Object.class);
+                new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
         ResponseEntity<LoginResponse> loginResponse = restTemplate.postForEntity(
-                "/auth/login", new LoginRequest(email, "password123"), LoginResponse.class);
+                "/auth/login", new LoginRequest(email, "Password123"), LoginResponse.class);
         return loginResponse.getBody().accessToken();
+    }
+
+    /**
+     * Создаёт байтовый массив размером 1024 байта с корректными magic bytes для указанного MIME-типа.
+     * Используется в тестах, где файл должен пройти валидацию сигнатуры.
+     */
+    private static byte[] validContent(String contentType) {
+        if ("image/webp".equals(contentType)) {
+            // WebP: "RIFF" at 0-3, 4 bytes file size, "WEBP" at 8-11
+            byte[] content = new byte[1024];
+            byte[] riff = {0x52, 0x49, 0x46, 0x46};
+            byte[] webp = {0x57, 0x45, 0x42, 0x50};
+            System.arraycopy(riff, 0, content, 0, 4);
+            System.arraycopy(webp, 0, content, 8, 4);
+            return content;
+        }
+        byte[] magic = switch (contentType) {
+            case "application/pdf" -> new byte[]{0x25, 0x50, 0x44, 0x46}; // %PDF
+            case "image/png" -> new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47}; // .PNG
+            case "image/jpeg" -> new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
+            default -> new byte[0];
+        };
+        byte[] content = new byte[1024];
+        System.arraycopy(magic, 0, content, 0, magic.length);
+        return content;
     }
 
     private ResponseEntity<FileUploadResponse> uploadFile(
@@ -267,7 +293,10 @@ class FileControllerIT {
         headers.setBearerAuth(token);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", new NamedByteArrayResource(content, filename, contentType));
+        HttpHeaders partHeaders = new HttpHeaders();
+        partHeaders.setContentType(MediaType.parseMediaType(contentType));
+        partHeaders.setContentDispositionFormData("file", filename);
+        body.add("file", new HttpEntity<>(new ByteArrayResource(content), partHeaders));
 
         HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
         return restTemplate.postForEntity(url, request, responseType);
@@ -279,32 +308,12 @@ class FileControllerIT {
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
 
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", new NamedByteArrayResource(content, filename, contentType));
+        HttpHeaders partHeaders = new HttpHeaders();
+        partHeaders.setContentType(MediaType.parseMediaType(contentType));
+        partHeaders.setContentDispositionFormData("file", filename);
+        body.add("file", new HttpEntity<>(new ByteArrayResource(content), partHeaders));
 
         HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
         return restTemplate.postForEntity(url, request, Object.class);
-    }
-
-    /**
-     * ByteArrayResource с переопределённым именем файла и content type для multipart-загрузок.
-     */
-    static class NamedByteArrayResource extends ByteArrayResource {
-        private final String filename;
-        private final String contentType;
-
-        NamedByteArrayResource(byte[] byteArray, String filename, String contentType) {
-            super(byteArray);
-            this.filename = filename;
-            this.contentType = contentType;
-        }
-
-        @Override
-        public String getFilename() {
-            return filename;
-        }
-
-        public String getContentType() {
-            return contentType;
-        }
     }
 }

@@ -15,6 +15,9 @@ import java.util.Set;
 @Table(name = "users")
 public class User extends BaseEntity {
 
+    @Version
+    private Long version;
+
     @Column(nullable = false, length = 255)
     private String email;
 

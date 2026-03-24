@@ -20,6 +20,9 @@ import java.util.Set;
 @Table(name = "mentor_profiles")
 public class MentorProfile extends BaseEntity {
 
+    @Version
+    private Long version;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;

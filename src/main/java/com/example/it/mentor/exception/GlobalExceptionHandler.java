@@ -10,6 +10,10 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import jakarta.validation.ConstraintViolationException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.util.List;
 
@@ -43,6 +47,38 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Обрабатывает нарушения @Min/@Max на @RequestParam (бросается через AOP-прокси @Validated).
+     *
+     * @return HTTP 400 с кодом {@code VALIDATION_ERROR}
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException ex,
+                                                                   HttpServletRequest request) {
+        List<String> details = ex.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                .toList();
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "VALIDATION_ERROR", "Ошибка валидации параметров запроса", request.getRequestURI(), details));
+    }
+
+    /**
+     * Обрабатывает HandlerMethodValidationException (Spring 7 для @Validated параметров контроллера).
+     *
+     * @return HTTP 400 с кодом {@code VALIDATION_ERROR}
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ErrorResponse> handleMethodValidation(HandlerMethodValidationException ex,
+                                                                HttpServletRequest request) {
+        List<String> details = ex.getAllErrors().stream()
+                .map(e -> e.getDefaultMessage())
+                .toList();
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "VALIDATION_ERROR", "Ошибка валидации параметров", request.getRequestURI(), details));
+    }
+
+    /**
      * Обрабатывает все бизнес-исключения {@link ApiException}.
      * HTTP-статус берётся из самого исключения.
      */
@@ -52,6 +88,34 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(ex.getStatus())
                 .body(ErrorResponse.of(ex.getStatus().value(), ex.getStatus().name(), ex.getMessage(), request.getRequestURI()));
+    }
+
+    /**
+     * Обрабатывает конфликты при оптимистичной блокировке (concurrent update).
+     *
+     * @return HTTP 409 с кодом {@code CONFLICT}
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex,
+                                                              HttpServletRequest request) {
+        log.warn("Конфликт оптимистичной блокировки: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(409, "CONFLICT", "Данные были изменены другим пользователем. Повторите запрос.", request.getRequestURI()));
+    }
+
+    /**
+     * Обрабатывает нарушения целостности БД (дублирование уникальных ключей и т.д.).
+     *
+     * @return HTTP 409 с кодом {@code CONFLICT}
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex,
+                                                             HttpServletRequest request) {
+        log.warn("Нарушение целостности данных: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(409, "CONFLICT", "Конфликт данных", request.getRequestURI()));
     }
 
     /**

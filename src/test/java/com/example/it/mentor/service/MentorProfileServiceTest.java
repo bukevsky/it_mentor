@@ -30,6 +30,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("MentorProfileService")
@@ -73,7 +74,7 @@ class MentorProfileServiceTest {
             MentorProfile newProfile = MentorProfile.builder().user(testUser).firstName("Алексей").lastName("Смирнов").build();
             MentorProfileResponse expectedResponse = mockResponse(1L, "Алексей", "Смирнов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(newProfile);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(newProfile));
@@ -91,10 +92,11 @@ class MentorProfileServiceTest {
         @DisplayName("существующий профиль — обновляет поля")
         void existingProfile_shouldUpdate() {
             MentorProfile existing = MentorProfile.builder().user(testUser).firstName("Старое").lastName("Имя").build();
+            ReflectionTestUtils.setField(existing, "id", 1L);
             MentorProfileRequest request = minimalRequest("Новое", "Имя");
             MentorProfileResponse updatedResponse = mockResponse(1L, "Новое", "Имя");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.of(existing));
             when(profileRepository.save(any())).thenReturn(existing);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(existing));
@@ -103,7 +105,7 @@ class MentorProfileServiceTest {
             MentorProfileResponse result = service.upsertProfile(request);
 
             assertThat(result.firstName()).as("firstName должен обновиться").isEqualTo("Новое");
-            verify(profileRepository, times(2)).save(existing);
+            verify(profileRepository).save(existing);
         }
 
         @Test
@@ -111,7 +113,7 @@ class MentorProfileServiceTest {
         void cityNotFound_shouldThrowNotFoundException() {
             MentorProfileRequest request = requestWithCity("Иван", "Иванов", 999L);
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(cityRepository.findById(999L)).thenReturn(Optional.empty());
 
@@ -126,10 +128,10 @@ class MentorProfileServiceTest {
             MentorProfileRequest request = requestWithSkill("Иван", "Иванов", 99L);
             MentorProfile profile = MentorProfile.builder().user(testUser).build();
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(profile);
-            when(skillRefRepository.findById(99L)).thenReturn(Optional.empty());
+            when(skillRefRepository.findAllById(List.of(99L))).thenReturn(List.of());
 
             assertThatThrownBy(() -> service.upsertProfile(request))
                     .isInstanceOf(NotFoundException.class)
@@ -143,7 +145,7 @@ class MentorProfileServiceTest {
             MentorProfile profile = MentorProfile.builder().user(testUser).build();
             MentorProfileResponse response = mockResponse(1L, "Иван", "Иванов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.empty());
             when(profileRepository.save(any())).thenReturn(profile);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(profile));
@@ -160,7 +162,7 @@ class MentorProfileServiceTest {
             MentorProfile profile = MentorProfile.builder().user(testUser).build();
             MentorProfileResponse response = mockResponse(1L, "Иван", "Иванов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.of(profile));
             when(profileRepository.save(any())).thenReturn(profile);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(profile));
@@ -179,7 +181,7 @@ class MentorProfileServiceTest {
                     .recruitmentStatus(RecruitmentStatus.PAUSED).build();
             MentorProfileResponse response = mockResponse(1L, "Иван", "Иванов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findByUserId(any())).thenReturn(Optional.of(profile));
             when(profileRepository.save(any())).thenReturn(profile);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(profile));
@@ -205,7 +207,7 @@ class MentorProfileServiceTest {
             MentorProfile profile = MentorProfile.builder().user(testUser).firstName("Дмитрий").build();
             MentorProfileResponse response = mockResponse(1L, "Дмитрий", "Козлов");
 
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.of(profile));
             when(mapper.toResponse(profile)).thenReturn(response);
 
@@ -219,7 +221,7 @@ class MentorProfileServiceTest {
         @Test
         @DisplayName("профиль не найден — бросает NotFoundException")
         void profileNotFound_shouldThrowNotFoundException() {
-            when(userService.findByEmail(TEST_EMAIL)).thenReturn(testUser);
+            when(userService.getCurrentUserEntity()).thenReturn(testUser);
             when(profileRepository.findWithDetailsByUserId(any())).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.getMyProfile())
