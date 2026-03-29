@@ -18,6 +18,8 @@
   - [4.4 Student Profile](#44-student-profile)
   - [4.5 Mentor Profile](#45-mentor-profile)
   - [4.6 Files](#46-files)
+  - [4.7 Mentor Search](#47-mentor-search)
+  - [4.8 Mentoring Requests](#48-mentoring-requests)
 - [5. TypeScript-типы (полная карта DTO)](#5-typescript-типы-полная-карта-dto)
 - [6. Enum-справочник](#6-enum-справочник)
 - [7. Загрузка файлов](#7-загрузка-файлов)
@@ -962,6 +964,325 @@ file: <binary image>
 
 ---
 
+### 4.7 Mentor Search
+
+#### `GET /profiles/mentors` — Поиск менторов
+
+**Auth:** Требуется JWT
+
+**Query params:**
+
+| Параметр | Тип | Обязательный | Описание |
+|---|---|---|---|
+| `q` | string | нет | Поиск по имени/фамилии (case-insensitive, ILIKE) |
+| `skillIds` | number[] | нет | Фильтр по навыкам (OR-логика — ментор с **любым** из навыков) |
+| `cityId` | number | нет | Фильтр по городу |
+| `recruitmentStatus` | string | нет | Enum: `OPEN` / `PAUSED` / `CLOSED` |
+| `mentoringType` | string | нет | Enum: `PRACTICE` / `INTERNSHIP` / `PROJECT` |
+| `mentoringChannel` | string | нет | Enum: `CHAT` / `CALLS` / `MIXED` |
+| `page` | number | нет | Номер страницы (default `0`, min `0`) |
+| `size` | number | нет | Размер страницы (default `20`, min `1`, max `50`) |
+| `sort` | string | нет | Поле и направление (default `createdAt,desc`; допустимые поля: `createdAt`, `firstName`, `lastName`) |
+
+**Response:** `200 OK`
+```json
+{
+  "content": [
+    {
+      "id": 10,
+      "userId": 2,
+      "firstName": "Алексей",
+      "lastName": "Смирнов",
+      "middleName": "Дмитриевич",
+      "position": "Java Tech Lead",
+      "department": "Platform Engineering",
+      "city": {
+        "id": 1,
+        "name": "Москва",
+        "region": "Московская область",
+        "country": "Россия"
+      },
+      "mentoringType": "PRACTICE",
+      "mentoringChannel": "CALLS",
+      "mentoringDuration": "THREE_MONTHS",
+      "menteeLimit": 5,
+      "recruitmentStatus": "OPEN",
+      "skills": [
+        {
+          "id": 15,
+          "skill": { "id": 1, "name": "Java", "category": "Backend" },
+          "level": "CONFIDENT"
+        }
+      ]
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true
+}
+```
+
+**Важные нюансы:**
+- `content[*]` — это `MentorCardResponse`: **НЕ содержит** поля `description`, `expectations`, `canHelpWith`, `phone`, `max`. Для полного профиля используйте `GET /profiles/mentors/{id}`.
+- `skillIds` передаётся как несколько query param: `?skillIds=1&skillIds=3`
+- Неизвестное поле в `sort` (напр. `sort=rating,desc`) не вызывает ошибку — fallback к `createdAt,desc`
+
+**Ошибки:**
+| Код | Когда |
+|---|---|
+| 400 | `size` > 50 или < 1 / `page` < 0 |
+| 401 | Нет токена |
+
+**TypeScript-пример:**
+
+```typescript
+async function searchMentors(params: MentorSearchParams): Promise<PagedResponse<MentorCardResponse>> {
+  const query = new URLSearchParams();
+  if (params.q) query.set('q', params.q);
+  if (params.skillIds?.length) params.skillIds.forEach(id => query.append('skillIds', String(id)));
+  if (params.cityId) query.set('cityId', String(params.cityId));
+  if (params.recruitmentStatus) query.set('recruitmentStatus', params.recruitmentStatus);
+  if (params.mentoringType) query.set('mentoringType', params.mentoringType);
+  if (params.mentoringChannel) query.set('mentoringChannel', params.mentoringChannel);
+  query.set('page', String(params.page ?? 0));
+  query.set('size', String(params.size ?? 20));
+  if (params.sort) query.set('sort', params.sort);
+
+  return apiCall<PagedResponse<MentorCardResponse>>(`${BASE_URL}/profiles/mentors?${query}`);
+}
+```
+
+---
+
+### 4.8 Mentoring Requests
+
+Система заявок на менторство. Студент может отправить заявку ментору, ментор может отправить приглашение студенту.
+
+#### Жизненный цикл заявки
+
+```
+                    [Инициатор]           [Адресат]
+SENT ──────────────────────────────────────────────────── REVIEWING
+  │  ← инициатор отменяет (cancel)                            │
+  └── CANCELLED                                     NEEDS_CLARIFICATION
+                                                              │
+                                                   ┌──── ACCEPTED ────┐
+                                                   │        │         │
+                                                REJECTED  COMPLETED CANCELLED
+```
+
+**Правила доступа:**
+- `view`, `needs-clarification`, `accept`, `reject` — только **адресат** заявки
+- `cancel` — только **инициатор** заявки (только в статусах SENT / REVIEWING / NEEDS_CLARIFICATION)
+- `complete` — любой **участник** заявки (только в статусе ACCEPTED)
+- `GET` (список и по ID) — любой **участник** заявки
+
+---
+
+#### `POST /mentoring/requests` — Создать заявку
+
+**Auth:** Требуется JWT (роль STUDENT или MENTOR)
+
+**Request:**
+```json
+{
+  "targetProfileId": 10,
+  "goalType": "PRACTICE",
+  "message": "Хочу пройти практику по Java/Spring. Готов уделять 20 часов в неделю."
+}
+```
+
+| Поле | Тип | Обязательное | Валидация | Описание |
+|---|---|---|---|---|
+| `targetProfileId` | number | **да** | `@NotNull` | ID профиля адресата (если студент — ID mentor_profile; если ментор — ID student_profile) |
+| `goalType` | string | **да** | `@NotNull`, Enum: [MentoringType](#mentoringtype) | Цель менторинга |
+| `message` | string | **да** | `@NotBlank`, max 2000 | Сопроводительное сообщение |
+
+**Response:** `201 Created` — структура `MentoringRequestResponse` (см. ниже)
+
+**Правила создания:**
+- Студент отправляет заявку ментору: ментор должен иметь `recruitmentStatus = OPEN`
+- Ментор отправляет приглашение студенту: статус ментора не проверяется
+- Нельзя создать заявку самому себе (422)
+- Нельзя создать вторую активную заявку между теми же студентом и ментором (409)
+
+**Ошибки:**
+| Код | Когда |
+|---|---|
+| 400 | Невалидные поля |
+| 401 | Нет токена |
+| 403 | Роль не STUDENT и не MENTOR |
+| 404 | Профиль отправителя или получателя не найден |
+| 409 | Активная заявка уже существует |
+| 422 | Ментор не принимает студентов / заявка самому себе |
+
+---
+
+#### `GET /mentoring/requests` — Мои заявки
+
+**Auth:** Требуется JWT
+
+**Query params:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `status` | string | Фильтр по статусу (опциональный): `SENT`, `REVIEWING`, `NEEDS_CLARIFICATION`, `ACCEPTED`, `REJECTED`, `CANCELLED`, `COMPLETED` |
+| `page` | number | Номер страницы (default `0`) |
+| `size` | number | Размер страницы (default `20`, max `100`) |
+
+**Response:** `200 OK` — `PagedResponse<MentoringRequestResponse>`, сортировка по `createdAt DESC`.
+
+Возвращает только **свои** заявки: ментор видит заявки своего профиля, студент — своего.
+
+---
+
+#### `GET /mentoring/requests/{id}` — Заявка по ID
+
+**Auth:** Требуется JWT
+
+**Response:** `200 OK` — `MentoringRequestResponse`
+
+**Ошибки:** `404` если не найдена, `403` если текущий пользователь не участник.
+
+---
+
+#### `PUT /mentoring/requests/{id}/view` — Отметить как просмотренную
+
+**Auth:** Требуется JWT (только адресат)
+
+Переводит статус `SENT → REVIEWING`. Идемпотентна: если статус уже не `SENT` — возвращает текущее состояние без ошибки.
+
+**Response:** `200 OK` — `MentoringRequestResponse`
+
+---
+
+#### `PUT /mentoring/requests/{id}/needs-clarification` — Запросить уточнение
+
+**Auth:** Требуется JWT (только адресат)
+
+**Request:**
+```json
+{
+  "clarificationNote": "Уточните, пожалуйста, ваш текущий уровень знания Java."
+}
+```
+
+| Поле | Тип | Обязательное | Валидация |
+|---|---|---|---|
+| `clarificationNote` | string | **да** | `@NotBlank`, max 2000 |
+
+**Response:** `200 OK` — `MentoringRequestResponse` со статусом `NEEDS_CLARIFICATION`
+
+**Ошибки:** `422` если статус уже `ACCEPTED`, `REJECTED`, `CANCELLED` или `COMPLETED`.
+
+---
+
+#### `PUT /mentoring/requests/{id}/accept` — Принять заявку
+
+**Auth:** Требуется JWT (только адресат)
+
+**Response:** `200 OK` — `MentoringRequestResponse` со статусом `ACCEPTED`
+
+**Особенность:** при направлении `STUDENT_TO_MENTOR` проверяется `menteeLimit`. Если ментор уже набрал максимум принятых студентов — `422 UNPROCESSABLE_ENTITY`.
+
+**Ошибки:** `422` если статус не `SENT` / `REVIEWING` / `NEEDS_CLARIFICATION`, или превышен `menteeLimit`.
+
+---
+
+#### `PUT /mentoring/requests/{id}/reject` — Отклонить заявку
+
+**Auth:** Требуется JWT (только адресат)
+
+**Request:**
+```json
+{
+  "reason": "Ваш уровень пока не соответствует требованиям для нашей программы."
+}
+```
+
+| Поле | Тип | Обязательное | Валидация |
+|---|---|---|---|
+| `reason` | string | нет | max 2000 |
+
+**Response:** `200 OK` — `MentoringRequestResponse` со статусом `REJECTED`
+
+---
+
+#### `PUT /mentoring/requests/{id}/cancel` — Отменить заявку
+
+**Auth:** Требуется JWT (только инициатор)
+
+**Работает только в статусах:** `SENT`, `REVIEWING`, `NEEDS_CLARIFICATION`
+
+**Response:** `200 OK` — `MentoringRequestResponse` со статусом `CANCELLED`
+
+**Ошибки:** `422` если заявка уже принята/отклонена/завершена.
+
+---
+
+#### `PUT /mentoring/requests/{id}/complete` — Завершить менторство
+
+**Auth:** Требуется JWT (любой участник)
+
+**Работает только в статусе:** `ACCEPTED`
+
+**Response:** `200 OK` — `MentoringRequestResponse` со статусом `COMPLETED`
+
+**Ошибки:** `422` если статус не `ACCEPTED`.
+
+---
+
+#### Структура `MentoringRequestResponse`
+
+```json
+{
+  "id": 1,
+  "studentProfileId": 42,
+  "mentorProfileId": 10,
+  "studentProfile": {
+    "id": 42,
+    "firstName": "Иван",
+    "lastName": "Петров"
+  },
+  "mentorProfile": {
+    "id": 10,
+    "firstName": "Алексей",
+    "lastName": "Смирнов",
+    "position": "Java Tech Lead"
+  },
+  "direction": "STUDENT_TO_MENTOR",
+  "status": "SENT",
+  "goalType": "PRACTICE",
+  "message": "Хочу пройти практику по Java/Spring...",
+  "clarificationNote": null,
+  "reason": null,
+  "createdAt": "2025-03-19T14:30:00+03:00",
+  "respondedAt": null,
+  "completedAt": null
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `id` | number | ID заявки |
+| `studentProfileId` | number | ID профиля студента |
+| `mentorProfileId` | number | ID профиля ментора |
+| `studentProfile` | object | Краткий профиль студента (id, firstName, lastName) |
+| `mentorProfile` | object | Краткий профиль ментора (id, firstName, lastName, position) |
+| `direction` | string | `STUDENT_TO_MENTOR` или `MENTOR_TO_STUDENT` |
+| `status` | string | Текущий статус (см. [MentoringRequestStatus](#mentoringrequeststatus)) |
+| `goalType` | string | Цель менторинга (MentoringType) |
+| `message` | string | Сообщение инициатора |
+| `clarificationNote` | string \| null | Уточнение от адресата (заполняется при `needs-clarification`) |
+| `reason` | string \| null | Причина отклонения (заполняется при `reject`) |
+| `createdAt` | string | Дата создания (OffsetDateTime) |
+| `respondedAt` | string \| null | Дата первого ответа адресата |
+| `completedAt` | string \| null | Дата завершения |
+
+---
+
 ## 5. TypeScript-типы (полная карта DTO)
 
 Копируйте в проект как есть. Типы 1:1 соответствуют серверным Java records.
@@ -1207,6 +1528,101 @@ interface MentorSkillResponse {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pagination
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface PagedResponse<T> {
+  content: T[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  last: boolean;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Mentor Search
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface MentorSearchParams {
+  q?: string;
+  skillIds?: number[];
+  cityId?: number;
+  recruitmentStatus?: RecruitmentStatus;
+  mentoringType?: MentoringType;
+  mentoringChannel?: MentoringChannel;
+  page?: number;                          // default 0
+  size?: number;                          // default 20, max 50
+  sort?: string;                          // "createdAt,desc" | "firstName,asc" | "lastName,asc"
+}
+
+// Облегчённая карточка ментора для списка (НЕ содержит description/expectations/canHelpWith)
+interface MentorCardResponse {
+  id: number;
+  userId: number;
+  firstName: string;
+  lastName: string;
+  middleName: string | null;
+  position: string | null;
+  department: string | null;
+  city: CityResponse | null;
+  mentoringType: string | null;
+  mentoringChannel: string | null;
+  mentoringDuration: string | null;
+  menteeLimit: number | null;
+  recruitmentStatus: string;
+  skills: MentorSkillResponse[];
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Mentoring Requests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface MentoringRequestCreateRequest {
+  targetProfileId: number;               // @NotNull: mentor_profile.id (если студент) или student_profile.id (если ментор)
+  goalType: MentoringType;               // @NotNull
+  message: string;                       // @NotBlank, max 2000
+}
+
+interface MentoringRequestClarifyRequest {
+  clarificationNote: string;             // @NotBlank, max 2000
+}
+
+interface MentoringRequestRejectRequest {
+  reason?: string | null;                // max 2000 (опциональный)
+}
+
+interface StudentProfileShortResponse {
+  id: number;
+  firstName: string;
+  lastName: string;
+}
+
+interface MentorProfileShortResponse {
+  id: number;
+  firstName: string;
+  lastName: string;
+  position: string | null;
+}
+
+interface MentoringRequestResponse {
+  id: number;
+  studentProfileId: number;
+  mentorProfileId: number;
+  studentProfile: StudentProfileShortResponse;
+  mentorProfile: MentorProfileShortResponse;
+  direction: MentoringRequestDirection;
+  status: MentoringRequestStatus;
+  goalType: string;                      // MentoringType as string
+  message: string;
+  clarificationNote: string | null;
+  reason: string | null;
+  createdAt: string;                     // ISO 8601 OffsetDateTime
+  respondedAt: string | null;
+  completedAt: string | null;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Files
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1237,6 +1653,9 @@ type MentoringType = 'PRACTICE' | 'INTERNSHIP' | 'PROJECT';
 type MentoringChannel = 'CHAT' | 'CALLS' | 'MIXED';
 type MentoringDuration = 'ONE_MONTH' | 'THREE_MONTHS' | 'FLEXIBLE';
 type RecruitmentStatus = 'OPEN' | 'PAUSED' | 'CLOSED';
+
+type MentoringRequestDirection = 'STUDENT_TO_MENTOR' | 'MENTOR_TO_STUDENT';
+type MentoringRequestStatus = 'SENT' | 'REVIEWING' | 'NEEDS_CLARIFICATION' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED';
 
 type FileType = 'RESUME' | 'PORTFOLIO' | 'ATTACHMENT' | 'AVATAR';
 ```
@@ -1344,6 +1763,25 @@ type FileType = 'RESUME' | 'PORTFOLIO' | 'ATTACHMENT' | 'AVATAR';
 | `PORTFOLIO` | `application/pdf`, `image/jpeg`, `image/png` | 10 MB | Портфолио |
 | `AVATAR` | `image/jpeg`, `image/png`, `image/webp` | 2 MB | Аватар |
 | `ATTACHMENT` | любой | без ограничений | Вложение |
+
+### MentoringRequestDirection
+
+| Значение | Описание |
+|---|---|
+| `STUDENT_TO_MENTOR` | Студент отправил заявку ментору |
+| `MENTOR_TO_STUDENT` | Ментор отправил приглашение студенту |
+
+### MentoringRequestStatus
+
+| Значение | Лейбл для UI | Описание |
+|---|---|---|
+| `SENT` | Отправлена | Заявка создана, адресат ещё не открыл |
+| `REVIEWING` | На рассмотрении | Адресат просматривает заявку |
+| `NEEDS_CLARIFICATION` | Требует уточнения | Адресат запросил дополнительную информацию |
+| `ACCEPTED` | Принята | Менторство активно |
+| `REJECTED` | Отклонена | Адресат отказал (терминальный статус) |
+| `CANCELLED` | Отменена | Инициатор отменил заявку (терминальный статус) |
+| `COMPLETED` | Завершена | Менторство успешно завершено (терминальный статус) |
 
 ### UserStatus
 
@@ -1532,6 +1970,40 @@ const FILE_CONSTRAINTS: Record<string, { accept: string; maxSize: number }> = {
    → Публичные данные студента
 ```
 
+### Сценарий 5: Поиск ментора и отправка заявки
+
+```
+1. GET /profiles/mentors?recruitmentStatus=OPEN&skillIds=1&skillIds=2&page=0&size=20
+   → PagedResponse<MentorCardResponse> — список открытых менторов с навыками Java/Spring
+
+2. GET /profiles/mentors/10
+   → Полный профиль ментора с description, expectations, canHelpWith
+
+3. POST /mentoring/requests
+   Body: { targetProfileId: 10, goalType: "PRACTICE", message: "..." }
+   → MentoringRequestResponse со status: "SENT"
+```
+
+### Сценарий 6: Обработка заявки ментором
+
+```
+1. GET /mentoring/requests?status=SENT
+   → Новые заявки ментора
+
+2. PUT /mentoring/requests/1/view
+   → status: "REVIEWING"
+
+3. PUT /mentoring/requests/1/needs-clarification
+   Body: { clarificationNote: "Уточните ваш уровень Java..." }
+   → status: "NEEDS_CLARIFICATION"
+
+4. PUT /mentoring/requests/1/accept    (или /reject с reason)
+   → status: "ACCEPTED"
+
+5. Позже: PUT /mentoring/requests/1/complete
+   → status: "COMPLETED"
+```
+
 ### Дерево решений после логина
 
 ```
@@ -1654,6 +2126,33 @@ function parseValidationDetails(details: string[]): Record<string, string> {
 
 ---
 
+### Q: Что такое `direction` в заявке и на что это влияет?
+
+**A:** `direction` показывает, кто инициировал заявку:
+- `STUDENT_TO_MENTOR` — студент отправил запрос ментору. **Адресат** = ментор.
+- `MENTOR_TO_STUDENT` — ментор отправил приглашение студенту. **Адресат** = студент.
+
+Операции `view`, `needs-clarification`, `accept`, `reject` доступны **адресату** (получателю).
+Операция `cancel` доступна **инициатору** (отправителю).
+
+---
+
+### Q: Как определить, является ли текущий пользователь инициатором или адресатом?
+
+**A:** Смотрите на `direction` и сравнивайте `studentProfile.id` / `mentorProfile.id` с профилем текущего пользователя:
+
+```typescript
+function isRecipient(request: MentoringRequestResponse, myProfileId: number, myRole: 'STUDENT' | 'MENTOR'): boolean {
+  if (request.direction === 'STUDENT_TO_MENTOR') {
+    return myRole === 'MENTOR' && request.mentorProfileId === myProfileId;
+  } else {
+    return myRole === 'STUDENT' && request.studentProfileId === myProfileId;
+  }
+}
+```
+
+---
+
 ### Q: Максимальный размер JSON body?
 
 **A:** Spring Boot default — нет жёсткого лимита на JSON body. Для файлов — global `max-request-size: 11MB` (включает multipart overhead).
@@ -1677,4 +2176,8 @@ function parseValidationDetails(details: string[]): Record<string, string> {
 
 ### Q: Есть ли пагинация в списках?
 
-**A:** Нет. Справочники и профили возвращаются целиком. Пагинация не реализована в текущей версии.
+**A:** Да, для двух ресурсов:
+- `GET /profiles/mentors` — `PagedResponse<MentorCardResponse>` (`page`, `size` до 50, `sort`)
+- `GET /mentoring/requests` — `PagedResponse<MentoringRequestResponse>` (`page`, `size` до 100)
+
+Справочники (`/dictionaries/**`) и публичные профили (`/profiles/students/{id}`, `/profiles/mentors/{id}`) возвращаются целиком без пагинации.

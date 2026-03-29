@@ -137,11 +137,30 @@ http://localhost:8080/swagger-ui.html
 
 ### Профиль ментора
 
-| Метод | Путь                    | Доступ | Описание                           |
-| :---- | :---------------------- | :----- | :--------------------------------- |
-| `PUT` | `/profile/mentor`       | JWT    | Создать или обновить профиль       |
-| `GET` | `/profile/mentor/me`    | JWT    | Получить свой профиль              |
-| `GET` | `/profiles/mentors/{id}` | JWT   | Получить профиль ментора по ID     |
+| Метод | Путь                     | Доступ | Описание                                         |
+| :---- | :----------------------- | :----- | :----------------------------------------------- |
+| `PUT` | `/profile/mentor`        | JWT    | Создать или обновить профиль                     |
+| `GET` | `/profile/mentor/me`     | JWT    | Получить свой профиль                            |
+| `GET` | `/profiles/mentors/{id}` | JWT    | Получить профиль ментора по ID                   |
+| `GET` | `/profiles/mentors`      | JWT    | Поиск менторов с фильтрацией и пагинацией        |
+
+Query params для поиска: `q`, `skillIds[]`, `cityId`, `recruitmentStatus`, `mentoringType`, `mentoringChannel`, `page` (default `0`), `size` (default `20`, max `50`), `sort` (default `createdAt,desc`). Возвращает `PagedResponse<MentorCardResponse>`.
+
+### Заявки на менторство (`/mentoring/requests`)
+
+| Метод    | Путь                                            | Доступ | Описание                                            |
+| :------- | :---------------------------------------------- | :----- | :-------------------------------------------------- |
+| `POST`   | `/mentoring/requests`                           | JWT    | Создать заявку (студент→ментор или ментор→студент)  |
+| `GET`    | `/mentoring/requests`                           | JWT    | Мои заявки (фильтрация по статусу, пагинация)       |
+| `GET`    | `/mentoring/requests/{id}`                      | JWT    | Получить заявку по ID                               |
+| `PUT`    | `/mentoring/requests/{id}/view`                 | JWT    | Адресат: перевести в REVIEWING                      |
+| `PUT`    | `/mentoring/requests/{id}/needs-clarification`  | JWT    | Адресат: запросить уточнение (NEEDS_CLARIFICATION)  |
+| `PUT`    | `/mentoring/requests/{id}/accept`               | JWT    | Адресат: принять заявку                             |
+| `PUT`    | `/mentoring/requests/{id}/reject`               | JWT    | Адресат: отклонить заявку                           |
+| `PUT`    | `/mentoring/requests/{id}/cancel`               | JWT    | Инициатор: отменить заявку                          |
+| `PUT`    | `/mentoring/requests/{id}/complete`             | JWT    | Любой участник: завершить менторство                |
+
+Статусы заявки: `SENT` → `REVIEWING` → `NEEDS_CLARIFICATION` → `ACCEPTED` → `COMPLETED`. Терминальные: `REJECTED`, `CANCELLED`.
 
 ### Файлы (`/files`)
 
@@ -178,17 +197,18 @@ http://localhost:8080/swagger-ui.html
 com.example.it.mentor
 ├── config/              Конфигурация (Security, JPA, OpenAPI, Storage)
 ├── security/            JWT-фильтр, провайдер, обработчики 401/403
-├── controller/          REST-контроллеры (6 шт.)
+├── controller/          REST-контроллеры (7 шт.)
 ├── service/             Бизнес-логика (9 шт.)
-├── repository/          Spring Data JPA репозитории (14 шт.)
-├── entity/              JPA-сущности
+├── repository/          Spring Data JPA репозитории (15 шт.) + MentorProfileSpecification
+├── entity/              JPA-сущности (15 шт.)
 │   ├── dict/            Справочники (City, Skill, Language, InteractionType)
-│   └── enums/           Перечисления (11 шт.)
-├── dto/                 Java records — request/response
+│   └── enums/           Перечисления (13 шт. + RoleCode, UserStatus)
+├── dto/                 Java records — request/response (35 шт.)
 │   ├── dict/            DTO справочников
 │   ├── student/         DTO профиля студента
-│   └── mentor/          DTO профиля ментора
-├── mapper/              MapStruct-маперы (5 шт.)
+│   ├── mentor/          DTO профиля ментора (+ MentorCardResponse, PagedResponse)
+│   └── mentoring/       DTO заявок на менторство (6 шт.)
+├── mapper/              MapStruct-маперы (6 шт.)
 └── exception/           Иерархия исключений + GlobalExceptionHandler
 ```
 
@@ -261,7 +281,9 @@ users ──< user_roles >── roles
   ├── mentor_profiles ──< mentor_skills >── dict_skill
   │       └──── dict_city
   │
-  └── stored_files (resume, portfolio, avatar)
+  ├── stored_files (resume, portfolio, avatar)
+  │
+  └── mentoring_requests (student_profile_id, mentor_profile_id)
 ```
 
 ### Миграции
@@ -277,8 +299,11 @@ Liquibase-миграции расположены в `src/main/resources/db/chan
 | `005_seed_dict_data.sql`         | Наполнение справочников                                        |
 | `006_create_student_profile.sql` | Профиль студента + связанные таблицы                           |
 | `007_create_mentor_profile.sql`  | Профиль ментора + навыки ментора                               |
-| `008_create_stored_files.sql`    | Хранилище файлов, FK `resume_file_id` в `student_profiles`     |
-| `009_add_city_id_indexes.sql`    | Индексы на FK `city_id` для student/mentor profiles            |
+| `008_create_stored_files.sql`    | Хранилище файлов, FK `resume_file_id` в `student_profiles`           |
+| `009_add_city_id_indexes.sql`    | Индексы на FK `city_id` для student/mentor profiles                  |
+| `010_add_mentor_search_indexes.sql` | Индексы для поиска менторов: status, type, channel, GIN-тргм по имени |
+| `011_add_version_columns.sql`    | Оптимистичная блокировка: колонки `version` в users, profiles        |
+| `012_create_mentoring_requests.sql` | Таблица `mentoring_requests` + индексы по mentor/student + статусу  |
 
 Миграции выполняются автоматически при запуске с профилем `local` или `test`.
 
@@ -303,8 +328,8 @@ Liquibase-миграции расположены в `src/main/resources/db/chan
 
 | Тип                  | Пакет             | Количество | Подход                                            |
 | :------------------- | :---------------- | :--------- | :------------------------------------------------ |
-| Unit-тесты сервисов  | `service/`        | 6 классов  | `@ExtendWith(MockitoExtension.class)` + Mockito   |
-| Интеграционные тесты | `controller/`     | 5 классов  | `@SpringBootTest` + TestRestTemplate + Testcontainers |
+| Unit-тесты сервисов  | `service/`        | 8 классов  | `@ExtendWith(MockitoExtension.class)` + Mockito   |
+| Интеграционные тесты | `controller/`     | 13 классов | `@SpringBootTest` + TestRestTemplate + Testcontainers |
 | Unit-тесты           | `security/`, `entity/` | 2 класса | JwtProvider, Enum labels                          |
 
 ### Соглашения
@@ -365,12 +390,12 @@ it.mentor/
 │   │   ├── Application.java
 │   │   ├── config/                    (5 классов)
 │   │   ├── security/                  (5 классов)
-│   │   ├── controller/                (6 контроллеров)
+│   │   ├── controller/                (7 контроллеров)
 │   │   ├── service/                   (9 сервисов)
-│   │   ├── repository/                (14 репозиториев)
-│   │   ├── entity/                    (7 сущностей + dict/ + enums/)
-│   │   ├── dto/                       (26 records)
-│   │   ├── mapper/                    (5 маперов)
+│   │   ├── repository/                (15 репозиториев + 1 Specification)
+│   │   ├── entity/                    (8 сущностей + dict/ + enums/)
+│   │   ├── dto/                       (35 records)
+│   │   ├── mapper/                    (6 маперов)
 │   │   └── exception/                 (7 исключений + handler)
 │   │
 │   └── resources/
@@ -379,12 +404,12 @@ it.mentor/
 │       ├── application-test.yaml
 │       └── db/changelog/
 │           ├── db.changelog-master.yaml
-│           └── changes/               (9 SQL-миграций)
+│           └── changes/               (12 SQL-миграций)
 │
 └── src/test/java/com/example/it/mentor/
     ├── ApplicationTests.java
-    ├── controller/                    (5 IT-тестов)
-    ├── service/                       (6 unit-тестов)
+    ├── controller/                    (13 IT-тестов)
+    ├── service/                       (8 unit-тестов)
     ├── security/                      (1 тест)
     └── entity/                        (1 тест)
 ```
@@ -395,19 +420,19 @@ it.mentor/
 
 | Категория               | Количество |
 | :---------------------- | :--------- |
-| Java-файлы (main)       | 96         |
-| Тестовые классы          | 14         |
-| Тестов (JUnit 5)         | 167        |
-| REST-эндпоинтов          | 17         |
-| Таблиц в БД             | 16         |
-| SQL-миграций             | 9          |
-| Контроллеров             | 6          |
+| Java-файлы (main)       | 125        |
+| Тестовые классы          | 24         |
+| Тестов (JUnit 5)         | 329        |
+| REST-эндпоинтов          | 29         |
+| Таблиц в БД             | 18         |
+| SQL-миграций             | 12         |
+| Контроллеров             | 7          |
 | Сервисов                 | 9          |
-| Репозиториев             | 14         |
-| JPA-сущностей            | 14         |
-| Перечислений (enum)      | 13         |
-| DTO (records)            | 26         |
-| MapStruct-маперов        | 5          |
+| Репозиториев             | 15         |
+| JPA-сущностей            | 15         |
+| Перечислений (enum)      | 15         |
+| DTO (records)            | 35         |
+| MapStruct-маперов        | 6          |
 
 ---
 
@@ -415,6 +440,6 @@ it.mentor/
 
 - [x] **Stage 1** — Аутентификация (регистрация, логин, JWT, сброс пароля)
 - [x] **Stage 2** — Справочники, профили студента/ментора, загрузка файлов
-- [ ] **Stage 3** — Поиск менторов, фильтрация, пагинация
-- [ ] **Stage 4** — Система заявок на менторство
+- [x] **Stage 3** — Поиск менторов: фильтрация, пагинация, двухфазная загрузка, GIN-индекс
+- [x] **Stage 4** — Система заявок на менторство: двунаправленные заявки, state machine, 7 статусов
 - [ ] **Stage 5** — Уведомления, чат, отзывы
