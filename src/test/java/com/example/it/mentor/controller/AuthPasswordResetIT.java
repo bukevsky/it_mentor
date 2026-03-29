@@ -40,14 +40,14 @@ class AuthPasswordResetIT {
     class ResetPassword {
 
         @Test
-        @DisplayName("валидный токен + новый пароль → 200")
+        @DisplayName("валидный код + новый пароль → 200")
         void validTokenAndPassword_shouldReturn200() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest(email, code, "NewPassword123!"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
@@ -57,10 +57,10 @@ class AuthPasswordResetIT {
         void afterReset_canLoginWithNewPassword() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest(email, code, "NewPassword123!"), Object.class);
 
             var loginResponse = restTemplate.postForEntity("/auth/login",
                     new LoginRequest(email, "NewPassword123!"), LoginResponse.class);
@@ -75,10 +75,10 @@ class AuthPasswordResetIT {
         void afterReset_oldPasswordShouldFail() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest(email, code, "NewPassword123!"), Object.class);
 
             var loginResponse = restTemplate.postForEntity("/auth/login",
                     new LoginRequest(email, "Password123"), Object.class);
@@ -87,35 +87,38 @@ class AuthPasswordResetIT {
         }
 
         @Test
-        @DisplayName("токен можно использовать только один раз — второй вызов → 401")
+        @DisplayName("код можно использовать только один раз — второй вызов → 401")
         void tokenIsOneTimeUse_secondAttemptShouldReturn401() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest(email, code, "NewPassword123!"), Object.class);
 
             var secondResponse = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "AnotherPassword456!"), Object.class);
+                    new ResetPasswordRequest(email, code, "AnotherPassword456!"), Object.class);
 
             assertThat(secondResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
 
         @Test
-        @DisplayName("несуществующий токен → 401")
+        @DisplayName("несуществующий код → 401")
         void nonExistentToken_shouldReturn401() {
+            String email = uniqueEmail();
+            register(email);
+
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(UUID.randomUUID().toString(), "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest(email, "000000", "NewPassword123!"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
 
         @Test
-        @DisplayName("явно неверный токен (пустой) → 400")
+        @DisplayName("явно неверный код (пустой) → 400")
         void blankToken_shouldReturn400() {
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest("", "NewPassword123!"), Object.class);
+                    new ResetPasswordRequest("user@example.com", "", "NewPassword123!"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
@@ -125,10 +128,10 @@ class AuthPasswordResetIT {
         void shortPassword_shouldReturn400() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "short"), Object.class);
+                    new ResetPasswordRequest(email, code, "short"), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
@@ -138,10 +141,10 @@ class AuthPasswordResetIT {
         void blankPassword_shouldReturn400() {
             String email = uniqueEmail();
             register(email);
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, ""), Object.class);
+                    new ResetPasswordRequest(email, code, ""), Object.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
@@ -150,7 +153,7 @@ class AuthPasswordResetIT {
         @DisplayName("ответ об ошибке содержит корректный формат ErrorResponse")
         void errorResponse_shouldHaveCorrectFormat() {
             var response = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(UUID.randomUUID().toString(), "NewPassword123!"),
+                    new ResetPasswordRequest("nonexistent@example.com", "000000", "NewPassword123!"),
                     ErrorResponse.class);
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
@@ -162,6 +165,19 @@ class AuthPasswordResetIT {
             softly.assertThat(response.getBody().message()).as("message").isNotBlank();
             softly.assertThat(response.getBody().timestamp()).as("timestamp").isNotNull();
             softly.assertAll();
+        }
+
+        @Test
+        @DisplayName("правильный email, неправильный код → 401")
+        void wrongCode_shouldReturn401() {
+            String email = uniqueEmail();
+            register(email);
+            createResetToken(email); // создаём токен, но используем другой код
+
+            var response = restTemplate.postForEntity("/auth/password/reset",
+                    new ResetPasswordRequest(email, "999999", "NewPassword123!"), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
     }
 
@@ -196,11 +212,11 @@ class AuthPasswordResetIT {
             register(email);
 
             // Act: forgot + get token via JDBC
-            String token = createResetToken(email);
+            String code = createResetToken(email);
 
             // Act: reset
             var resetResponse = restTemplate.postForEntity("/auth/password/reset",
-                    new ResetPasswordRequest(token, "BrandNewPass99!"), Object.class);
+                    new ResetPasswordRequest(email, code, "BrandNewPass99!"), Object.class);
             assertThat(resetResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
 
             // Assert: login with new password
@@ -211,7 +227,7 @@ class AuthPasswordResetIT {
         }
 
         @Test
-        @DisplayName("несколько forgot-запросов → каждый создаёт отдельный токен, все действительны до use")
+        @DisplayName("второй forgot-запрос инвалидирует первый код — остаётся только 1 активный")
         void multipleForgot_eachCreatesNewToken() {
             String email = uniqueEmail();
             register(email);
@@ -227,7 +243,27 @@ class AuthPasswordResetIT {
                     "WHERE u.email = ? AND t.used = false",
                     Integer.class, email);
 
-            assertThat(tokenCount).isGreaterThanOrEqualTo(2);
+            assertThat(tokenCount).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("второй forgot инвалидирует первый код — сброс с первым кодом → 401")
+        void forgotTwice_firstCodeNoLongerWorks() {
+            String email = uniqueEmail();
+            register(email);
+
+            // Первый forgot — получаем первый код
+            String firstCode = createResetToken(email);
+
+            // Второй forgot — инвалидирует первый код и создаёт новый
+            restTemplate.postForEntity("/auth/password/forgot",
+                    new ForgotPasswordRequest(email), Object.class);
+
+            // Первый код больше не работает
+            var response = restTemplate.postForEntity("/auth/password/reset",
+                    new ResetPasswordRequest(email, firstCode, "NewPassword123!"), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         }
     }
 
@@ -239,7 +275,7 @@ class AuthPasswordResetIT {
     }
 
     /**
-     * Вызывает forgot-password и возвращает токен из БД.
+     * Вызывает forgot-password и возвращает OTP-код из БД.
      * Использует JDBC напрямую, чтобы избежать LazyInitializationException
      * при обращении к полю user у detached-сущности PasswordResetToken.
      */
@@ -247,15 +283,15 @@ class AuthPasswordResetIT {
         restTemplate.postForEntity("/auth/password/forgot",
                 new ForgotPasswordRequest(email), Object.class);
 
-        String token = jdbcTemplate.queryForObject(
+        String code = jdbcTemplate.queryForObject(
                 "SELECT t.token FROM password_reset_tokens t " +
                 "JOIN users u ON t.user_id = u.id " +
                 "WHERE u.email = ? AND t.used = false " +
                 "ORDER BY t.id DESC LIMIT 1",
                 String.class, email);
 
-        assertThat(token).as("Токен для %s должен быть создан в БД", email).isNotBlank();
-        return token;
+        assertThat(code).as("OTP-код для %s должен быть создан в БД", email).isNotBlank();
+        return code;
     }
 
     private String uniqueEmail() {

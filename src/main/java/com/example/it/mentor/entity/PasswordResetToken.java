@@ -22,11 +22,15 @@ public class PasswordResetToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(nullable = false, unique = true, length = 255)
+    @Column(nullable = false, length = 6)
     private String token;
 
     @Column(nullable = false)
     private OffsetDateTime expiresAt;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private int attempts = 0;
 
     @Column(nullable = false)
     @Builder.Default

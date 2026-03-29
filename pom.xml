@@ -164,6 +164,12 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- Mail -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
+
 		<!-- MinIO SDK -->
 		<dependency>
 			<groupId>io.minio</groupId>
