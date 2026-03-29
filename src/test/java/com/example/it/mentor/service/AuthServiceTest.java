@@ -1,5 +1,6 @@
 package com.example.it.mentor.service;
 
+import com.example.it.mentor.config.OtpProperties;
 import com.example.it.mentor.dto.*;
 import com.example.it.mentor.entity.*;
 import com.example.it.mentor.exception.ConflictException;
@@ -44,6 +45,8 @@ class AuthServiceTest {
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private JwtProvider jwtProvider;
     @Mock private AuthMapper authMapper;
+    @Mock private EmailService emailService;
+    @Mock private OtpProperties otpProperties;
 
     // ── register ──────────────────────────────────────────────────────────────
 
@@ -290,10 +293,11 @@ class AuthServiceTest {
     class ForgotPassword {
 
         @Test
-        @DisplayName("существующий email → создаёт и сохраняет PasswordResetToken")
+        @DisplayName("существующий email → создаёт и сохраняет PasswordResetToken с 6-значным OTP")
         void existingEmail_shouldSaveResetToken() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
+            when(otpProperties.getExpirationMinutes()).thenReturn(15);
 
             authService.forgotPassword(new ForgotPasswordRequest("user@example.com"));
 
@@ -302,8 +306,8 @@ class AuthServiceTest {
 
             PasswordResetToken saved = tokenCaptor.getValue();
             assertThat(saved.getToken())
-                    .as("Токен должен быть непустой строкой (UUID)")
-                    .isNotBlank();
+                    .as("Токен должен быть 6-значным числовым OTP")
+                    .matches("\\d{6}");
             assertThat(saved.getUser())
                     .as("Токен должен быть привязан к пользователю")
                     .isEqualTo(user);
@@ -333,6 +337,31 @@ class AuthServiceTest {
             verify(userService).findByEmailOptional("user@example.com");
             verify(userService, never()).findByEmailOptional("USER@EXAMPLE.COM");
         }
+
+        @Test
+        @DisplayName("существующий email → инвалидирует предыдущие токены")
+        void existingEmail_shouldInvalidatePreviousTokens() {
+            var user = buildUser("user@example.com", UserStatus.ACTIVE);
+            org.springframework.test.util.ReflectionTestUtils.setField(user, "id", 42L);
+            when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
+            when(otpProperties.getExpirationMinutes()).thenReturn(15);
+
+            authService.forgotPassword(new ForgotPasswordRequest("user@example.com"));
+
+            verify(passwordResetTokenRepository).invalidateAllByUserId(user.getId());
+        }
+
+        @Test
+        @DisplayName("существующий email → отправляет OTP через EmailService")
+        void existingEmail_shouldCallEmailService() {
+            var user = buildUser("user@example.com", UserStatus.ACTIVE);
+            when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
+            when(otpProperties.getExpirationMinutes()).thenReturn(15);
+
+            authService.forgotPassword(new ForgotPasswordRequest("user@example.com"));
+
+            verify(emailService).sendPasswordResetOtp(eq("user@example.com"), matches("\\d{6}"));
+        }
     }
 
     // ── resetPassword ─────────────────────────────────────────────────────────
@@ -342,43 +371,57 @@ class AuthServiceTest {
     class ResetPassword {
 
         @Test
-        @DisplayName("валидный токен → пароль обновляется атомарно")
-        void validToken_shouldUpdatePasswordAtomically() {
+        @DisplayName("валидный код → пароль обновляется атомарно")
+        void validCode_shouldUpdatePasswordAtomically() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
-            var resetToken = PasswordResetToken.builder()
-                    .token("valid-uuid-token")
-                    .user(user)
-                    .expiresAt(OffsetDateTime.now().plusHours(1))
-                    .used(false)
-                    .build();
+            org.springframework.test.util.ReflectionTestUtils.setField(user, "id", 1L);
 
-            when(passwordResetTokenRepository.markTokenUsed(eq("valid-uuid-token"), any(OffsetDateTime.class)))
+            when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
+            when(otpProperties.getMaxAttempts()).thenReturn(5);
+            when(passwordResetTokenRepository.markTokenUsed(eq(1L), eq("123456"), any(OffsetDateTime.class), eq(5)))
                     .thenReturn(1);
-            when(passwordResetTokenRepository.findByToken("valid-uuid-token"))
-                    .thenReturn(Optional.of(resetToken));
-            when(passwordEncoder.encode("newPassword123")).thenReturn("$2a$new_hashed");
+            when(passwordEncoder.encode("NewPassword123")).thenReturn("$2a$new_hashed");
             when(userService.save(any())).thenReturn(user);
 
-            authService.resetPassword(new ResetPasswordRequest("valid-uuid-token", "newPassword123"));
+            authService.resetPassword(new ResetPasswordRequest("user@example.com", "123456", "NewPassword123"));
 
             assertThat(user.getPasswordHash())
                     .as("Пароль пользователя должен обновиться")
                     .isEqualTo("$2a$new_hashed");
-            verify(passwordResetTokenRepository).markTokenUsed(eq("valid-uuid-token"), any(OffsetDateTime.class));
+            verify(passwordResetTokenRepository).markTokenUsed(eq(1L), eq("123456"), any(OffsetDateTime.class), eq(5));
         }
 
         @Test
-        @DisplayName("недействительный/использованный/истёкший токен → UnauthorizedException")
-        void invalidToken_shouldThrowUnauthorized() {
-            when(passwordResetTokenRepository.markTokenUsed(eq("bad-token"), any(OffsetDateTime.class)))
+        @DisplayName("недействительный/использованный/истёкший код → UnauthorizedException + увеличение attempts")
+        void invalidCode_shouldThrowUnauthorizedAndIncrementAttempts() {
+            var user = buildUser("user@example.com", UserStatus.ACTIVE);
+            org.springframework.test.util.ReflectionTestUtils.setField(user, "id", 1L);
+
+            when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
+            when(otpProperties.getMaxAttempts()).thenReturn(5);
+            when(passwordResetTokenRepository.markTokenUsed(eq(1L), eq("000000"), any(OffsetDateTime.class), eq(5)))
                     .thenReturn(0);
 
             assertThatThrownBy(() ->
-                    authService.resetPassword(new ResetPasswordRequest("bad-token", "newPass")))
+                    authService.resetPassword(new ResetPasswordRequest("user@example.com", "000000", "NewPass123")))
                     .isInstanceOf(UnauthorizedException.class)
-                    .hasMessageContaining("Недействительный или уже использованный токен");
+                    .hasMessageContaining("Недействительный");
 
+            verify(passwordResetTokenRepository).incrementAttempts(1L, "000000");
             verify(userService, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("несуществующий email при сбросе → UnauthorizedException")
+        void nonExistingEmailOnReset_shouldThrowUnauthorized() {
+            when(userService.findByEmailOptional("ghost@example.com")).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() ->
+                    authService.resetPassword(new ResetPasswordRequest("ghost@example.com", "123456", "NewPass123")))
+                    .isInstanceOf(UnauthorizedException.class)
+                    .hasMessageContaining("Недействительный код сброса пароля");
+
+            verify(passwordResetTokenRepository, never()).markTokenUsed(any(), any(), any(), anyInt());
         }
     }
 

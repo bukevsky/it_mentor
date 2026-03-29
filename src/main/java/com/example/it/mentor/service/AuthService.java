@@ -1,5 +1,6 @@
 package com.example.it.mentor.service;
 
+import com.example.it.mentor.config.OtpProperties;
 import com.example.it.mentor.dto.*;
 import com.example.it.mentor.entity.*;
 import com.example.it.mentor.exception.ConflictException;
@@ -17,9 +18,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.Set;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -33,6 +34,10 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final AuthMapper authMapper;
+    private final EmailService emailService;
+    private final OtpProperties otpProperties;
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -101,29 +106,40 @@ public class AuthService {
 
         // ifPresent — не раскрываем факт существования email: всегда возвращаем 200
         userService.findByEmailOptional(email).ifPresent(user -> {
+            // Аннулируем все старые активные коды для этого пользователя
+            passwordResetTokenRepository.invalidateAllByUserId(user.getId());
+
+            String otp = generateOtp();
             PasswordResetToken resetToken = PasswordResetToken.builder()
                     .user(user)
-                    .token(UUID.randomUUID().toString())
-                    .expiresAt(OffsetDateTime.now().plusHours(1))
+                    .token(otp)
+                    .expiresAt(OffsetDateTime.now().plusMinutes(otpProperties.getExpirationMinutes()))
                     .build();
             passwordResetTokenRepository.save(resetToken);
-            log.info("Создан токен сброса пароля для: {}", email);
-            // TODO: отправить email с токеном
+            emailService.sendPasswordResetOtp(email, otp);
+            log.info("OTP-код сброса пароля сгенерирован для: {}", email);
         });
+    }
+
+    private static String generateOtp() {
+        return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
     }
 
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
-        int updated = passwordResetTokenRepository.markTokenUsed(request.token(), OffsetDateTime.now());
+        String email = request.email().toLowerCase();
+
+        User user = userService.findByEmailOptional(email)
+                .orElseThrow(() -> new UnauthorizedException("Недействительный код сброса пароля"));
+
+        int updated = passwordResetTokenRepository.markTokenUsed(
+                user.getId(), request.code(), OffsetDateTime.now(), otpProperties.getMaxAttempts());
+
         if (updated == 0) {
-            throw new UnauthorizedException("Недействительный или уже использованный токен сброса пароля");
+            passwordResetTokenRepository.incrementAttempts(user.getId(), request.code());
+            throw new UnauthorizedException("Недействительный, истёкший или заблокированный код сброса пароля");
         }
 
-        PasswordResetToken resetToken = passwordResetTokenRepository
-                .findByToken(request.token())
-                .orElseThrow(() -> new UnauthorizedException("Недействительный токен сброса пароля"));
-
-        User user = resetToken.getUser();
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userService.save(user);
         log.info("Пароль успешно сброшен для пользователя: {}", user.getEmail());
