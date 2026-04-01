@@ -40,6 +40,7 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
                 .toList();
+        log.debug("Ошибка валидации [{} {}]: {}", request.getMethod(), request.getRequestURI(), details);
 
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
@@ -84,10 +85,15 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(ApiException ex, HttpServletRequest request) {
-        log.debug("ApiException [{}]: {}", ex.getStatus(), ex.getMessage());
+        int statusValue = ex.getStatus().value();
+        if (statusValue == 401 || statusValue == 403) {
+            log.warn("Доступ запрещён [{}] {} {}: {}", statusValue, request.getMethod(), request.getRequestURI(), ex.getMessage());
+        } else {
+            log.debug("ApiException [{}] {} {}: {}", statusValue, request.getMethod(), request.getRequestURI(), ex.getMessage());
+        }
         return ResponseEntity
                 .status(ex.getStatus())
-                .body(ErrorResponse.of(ex.getStatus().value(), ex.getStatus().name(), ex.getMessage(), request.getRequestURI()));
+                .body(ErrorResponse.of(statusValue, ex.getStatus().name(), ex.getMessage(), request.getRequestURI()));
     }
 
     /**
@@ -152,7 +158,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
-        log.error("Необработанное исключение: {}", ex.getMessage(), ex);
+        log.error("Необработанное исключение [{} {}]: {}", request.getMethod(), request.getRequestURI(), ex.getMessage(), ex);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.of(500, "INTERNAL_SERVER_ERROR", "Внутренняя ошибка сервера", request.getRequestURI()));

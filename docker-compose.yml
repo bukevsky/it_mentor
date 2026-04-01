@@ -41,6 +41,22 @@ services:
       - "1025:1025"   # SMTP
       - "8025:8025"   # Web UI
 
+  sonarqube:
+    image: sonarqube:community
+    container_name: itmentor-sonarqube
+    ports:
+      - "9090:9000"
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_WEB_JAVAOPTS: "-javaagent:/opt/sonarqube/extensions/plugins/sonarqube-community-branch-plugin.jar=web"
+      SONAR_CE_JAVAOPTS: "-javaagent:/opt/sonarqube/extensions/plugins/sonarqube-community-branch-plugin.jar=ce"
+    volumes:
+      - ./sonar/plugins:/opt/sonarqube/extensions/plugins
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+
 volumes:
   postgres_data:
   minio_data:
+  sonarqube_data:
+  sonarqube_logs:

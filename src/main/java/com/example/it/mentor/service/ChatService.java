@@ -18,11 +18,13 @@ import com.example.it.mentor.repository.ChatMessageRepository;
 import com.example.it.mentor.repository.ChatRepository;
 import com.example.it.mentor.repository.StoredFileRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
@@ -48,6 +50,7 @@ public class ChatService {
                 .mentorUserId(mentorUserId)
                 .build();
         chatRepository.save(chat);
+        log.info("Чат создан: chatId={}, requestId={}, studentUserId={}, mentorUserId={}", chat.getId(), request.getId(), studentUserId, mentorUserId);
     }
 
     public ChatResponse getById(Long chatId) {
@@ -109,6 +112,7 @@ public class ChatService {
                 .build();
 
         message = messageRepository.save(message);
+        log.debug("Сообщение отправлено: chatId={}, senderId={}, hasAttachment={}", chatId, currentUser.getId(), attachment != null);
         return mapper.toMessageResponse(message);
     }
 
