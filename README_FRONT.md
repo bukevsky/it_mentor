@@ -20,6 +20,8 @@
   - [4.6 Files](#46-files)
   - [4.7 Mentor Search](#47-mentor-search)
   - [4.8 Mentoring Requests](#48-mentoring-requests)
+  - [4.9 Chat](#49-chat)
+  - [4.10 Admin](#410-admin)
 - [5. TypeScript-типы (полная карта DTO)](#5-typescript-типы-полная-карта-dto)
 - [6. Enum-справочник](#6-enum-справочник)
 - [7. Загрузка файлов](#7-загрузка-файлов)
@@ -349,22 +351,26 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
 
 ---
 
-#### `POST /auth/password/reset` — Сброс пароля
+#### `POST /auth/password/reset` — Сброс пароля (OTP)
 
 **Auth:** Не требуется
+
+**Поток:** Пользователь получает на email 6-значный числовой код (TTL 15 минут, 3 попытки). Код передаётся вместе с email и новым паролем.
 
 **Request:**
 ```json
 {
-  "token": "550e8400-e29b-41d4-a716-446655440000",
-  "newPassword": "newSecurePass123"
+  "email": "student@example.com",
+  "code": "123456",
+  "newPassword": "NewSecurePass123"
 }
 ```
 
 | Поле | Тип | Обязательное | Валидация |
 |---|---|---|---|
-| `token` | string | да | `@NotBlank` |
-| `newPassword` | string | да | `@NotBlank`, min 8 символов |
+| `email` | string | да | `@NotBlank`, `@Email` |
+| `code` | string | да | `@NotBlank`, ровно 6 цифр (`\d{6}`) |
+| `newPassword` | string | да | `@NotBlank`, 8–128 символов, минимум 1 заглавная + 1 строчная + 1 цифра |
 
 **Response:** `200 OK` (пустое тело)
 
@@ -372,7 +378,7 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
 | Код | Когда |
 |---|---|
 | 400 | Невалидные поля |
-| 404 | Токен не найден / истёк |
+| 404 | Код не найден / истёк / превышен лимит попыток |
 
 ---
 
@@ -964,6 +970,30 @@ file: <binary image>
 
 ---
 
+#### `POST /files/chat-attachment` — Загрузить вложение в чат
+
+**Auth:** Требуется JWT
+
+**Ограничения:**
+- **Формат:** любой
+- **Размер:** без ограничений
+- **Предусловие:** нет (привязка к сообщению происходит при отправке сообщения)
+
+**Request:** `Content-Type: multipart/form-data`
+```
+file: <binary>
+```
+
+**Response:** `201 Created` — структура идентична ответу `/files/resume`, `fileType: "CHAT_ATTACHMENT"`
+
+**Ошибки:**
+| Код | Когда |
+|---|---|
+| 401 | Нет токена |
+| 500 | Ошибка хранилища |
+
+---
+
 ### 4.7 Mentor Search
 
 #### `GET /profiles/mentors` — Поиск менторов
@@ -1283,6 +1313,181 @@ SENT ─────────────────────────
 
 ---
 
+### 4.9 Chat
+
+Чат создаётся автоматически при принятии заявки на менторство (`PUT /mentoring/requests/{id}/accept`). Доступ к чату — только участники (студент и ментор из заявки).
+
+#### `GET /chats` — Мои чаты
+
+**Auth:** Требуется JWT
+
+**Query params:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `page` | number | default `0` |
+| `size` | number | default `20`, max `100` |
+
+**Response:** `200 OK` — `PagedResponse<ChatResponse>`, сортировка по `createdAt DESC`
+
+---
+
+#### `GET /chats/{chatId}` — Чат по ID
+
+**Auth:** Требуется JWT
+
+**Response:** `200 OK` — `ChatResponse`
+
+**Ошибки:** `404` если не найден, `403` если не участник.
+
+---
+
+#### `GET /chats/by-request/{requestId}` — Чат по ID заявки
+
+**Auth:** Требуется JWT
+
+**Response:** `200 OK` — `ChatResponse`
+
+**Ошибки:** `404` если чат не создан (заявка не принята), `403` если не участник.
+
+---
+
+#### `GET /chats/{chatId}/messages` — Сообщения чата
+
+**Auth:** Требуется JWT
+
+**Query params:**
+
+| Параметр | Тип | Описание |
+|---|---|---|
+| `page` | number | default `0` |
+| `size` | number | default `20`, max `100` |
+
+**Response:** `200 OK` — `PagedResponse<ChatMessageResponse>`, сортировка по `createdAt DESC`
+
+---
+
+#### `POST /chats/{chatId}/messages` — Отправить сообщение
+
+**Auth:** Требуется JWT
+
+**Request:**
+```json
+{
+  "body": "Привет! Как дела с домашним заданием?",
+  "attachmentFileId": null
+}
+```
+
+| Поле | Тип | Обязательное | Описание |
+|---|---|---|---|
+| `body` | string \| null | нет | Текст сообщения |
+| `attachmentFileId` | number \| null | нет | ID файла-вложения (загрузить через `/files/chat-attachment`) |
+
+**Response:** `201 Created` — `ChatMessageResponse`
+
+**Ошибки:**
+| Код | Когда |
+|---|---|
+| 401 | Нет токена |
+| 403 | Не участник чата |
+| 404 | Чат не найден |
+
+---
+
+#### Структура `ChatResponse`
+
+```json
+{
+  "id": 1,
+  "mentoringRequestId": 5,
+  "studentUserId": 1,
+  "mentorUserId": 2,
+  "createdAt": "2025-03-19T14:30:00+03:00"
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `id` | number | ID чата |
+| `mentoringRequestId` | number | ID заявки, по которой создан чат |
+| `studentUserId` | number | ID пользователя-студента |
+| `mentorUserId` | number | ID пользователя-ментора |
+| `createdAt` | string | Дата создания (OffsetDateTime) |
+
+---
+
+#### Структура `ChatMessageResponse`
+
+```json
+{
+  "id": 10,
+  "chatId": 1,
+  "senderUserId": 1,
+  "body": "Привет! Как дела с домашним заданием?",
+  "attachment": null,
+  "createdAt": "2025-03-19T15:00:00+03:00"
+}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `id` | number | ID сообщения |
+| `chatId` | number | ID чата |
+| `senderUserId` | number | ID отправителя |
+| `body` | string \| null | Текст сообщения |
+| `attachment` | AttachmentInfo \| null | Вложение (если есть) |
+| `createdAt` | string | Дата отправки (OffsetDateTime) |
+
+```json
+// AttachmentInfo
+{
+  "fileId": 100,
+  "originalFilename": "task.pdf",
+  "contentType": "application/pdf",
+  "size": 245760
+}
+```
+
+---
+
+### 4.10 Admin
+
+Все эндпоинты доступны только пользователям с ролью `ADMIN`.
+
+#### `PUT /admin/users/{userId}/role` — Назначить роль пользователю
+
+**Auth:** Требуется JWT (роль ADMIN)
+
+**Логика:**
+- Роли `STUDENT` и `MENTOR` взаимоисключающие: при назначении `MENTOR` роль `STUDENT` снимается, и наоборот.
+- Назначить роль `ADMIN` через этот endpoint нельзя — вернёт `422`.
+- При смене роли автоматически создаётся профиль (если профиля ещё нет). Имя копируется из профиля предыдущей роли, если доступно.
+- Новый JWT нужно получить через повторный `/auth/login` — старый токен не обновится автоматически.
+
+**Request:**
+```json
+{
+  "role": "MENTOR"
+}
+```
+
+| Поле | Тип | Обязательное | Валидация | Описание |
+|---|---|---|---|---|
+| `role` | string | **да** | `@NotNull`, `STUDENT` или `MENTOR` | Целевая роль |
+
+**Response:** `200 OK` (пустое тело)
+
+**Ошибки:**
+| Код | Когда |
+|---|---|
+| 401 | Нет токена |
+| 403 | Роль не ADMIN |
+| 404 | Пользователь с таким ID не найден |
+| 422 | Попытка назначить роль ADMIN |
+
+---
+
 ## 5. TypeScript-типы (полная карта DTO)
 
 Копируйте в проект как есть. Типы 1:1 соответствуют серверным Java records.
@@ -1328,8 +1533,9 @@ interface ForgotPasswordRequest {
 }
 
 interface ResetPasswordRequest {
-  token: string;           // @NotBlank, UUID из письма
-  newPassword: string;     // @NotBlank, min 8
+  email: string;           // @NotBlank, @Email
+  code: string;            // @NotBlank, ровно 6 цифр
+  newPassword: string;     // @NotBlank, 8–128 символов, 1 заглавная + 1 строчная + 1 цифра
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1657,7 +1863,48 @@ type RecruitmentStatus = 'OPEN' | 'PAUSED' | 'CLOSED';
 type MentoringRequestDirection = 'STUDENT_TO_MENTOR' | 'MENTOR_TO_STUDENT';
 type MentoringRequestStatus = 'SENT' | 'REVIEWING' | 'NEEDS_CLARIFICATION' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED';
 
-type FileType = 'RESUME' | 'PORTFOLIO' | 'ATTACHMENT' | 'AVATAR';
+type FileType = 'RESUME' | 'PORTFOLIO' | 'CHAT_ATTACHMENT' | 'AVATAR';
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Chat
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface ChatResponse {
+  id: number;
+  mentoringRequestId: number;
+  studentUserId: number;
+  mentorUserId: number;
+  createdAt: string;             // ISO 8601 OffsetDateTime
+}
+
+interface ChatMessageResponse {
+  id: number;
+  chatId: number;
+  senderUserId: number;
+  body: string | null;
+  attachment: AttachmentInfo | null;
+  createdAt: string;             // ISO 8601 OffsetDateTime
+}
+
+interface AttachmentInfo {
+  fileId: number;
+  originalFilename: string;
+  contentType: string;           // MIME type
+  size: number;                  // bytes
+}
+
+interface SendMessageRequest {
+  body?: string | null;          // текст (хотя бы одно из body/attachmentFileId)
+  attachmentFileId?: number | null; // ID файла из POST /files/chat-attachment
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Admin
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface AdminRoleRequest {
+  role: 'STUDENT' | 'MENTOR';   // @NotNull, ADMIN запрещён
+}
 ```
 
 ---
@@ -1762,7 +2009,7 @@ type FileType = 'RESUME' | 'PORTFOLIO' | 'ATTACHMENT' | 'AVATAR';
 | `RESUME` | `application/pdf` | 5 MB | Резюме |
 | `PORTFOLIO` | `application/pdf`, `image/jpeg`, `image/png` | 10 MB | Портфолио |
 | `AVATAR` | `image/jpeg`, `image/png`, `image/webp` | 2 MB | Аватар |
-| `ATTACHMENT` | любой | без ограничений | Вложение |
+| `CHAT_ATTACHMENT` | любой | без ограничений | Вложение в чат |
 
 ### MentoringRequestDirection
 
@@ -1811,6 +2058,7 @@ type FileType = 'RESUME' | 'PORTFOLIO' | 'ATTACHMENT' | 'AVATAR';
 | `POST /files/resume` | PDF | 5 MB | Студент | → `studentProfile.resumeFileId` |
 | `POST /files/portfolio` | PDF, JPEG, PNG | 10 MB | Нет | Хранится отдельно |
 | `POST /files/avatar` | JPEG, PNG, WebP | 2 MB | Нет | → `user` |
+| `POST /files/chat-attachment` | любой | без ограничений | Нет | Хранится отдельно (привязывается к сообщению) |
 
 ### Пример: загрузка аватара (React)
 
@@ -2176,8 +2424,10 @@ function isRecipient(request: MentoringRequestResponse, myProfileId: number, myR
 
 ### Q: Есть ли пагинация в списках?
 
-**A:** Да, для двух ресурсов:
+**A:** Да, для нескольких ресурсов:
 - `GET /profiles/mentors` — `PagedResponse<MentorCardResponse>` (`page`, `size` до 50, `sort`)
 - `GET /mentoring/requests` — `PagedResponse<MentoringRequestResponse>` (`page`, `size` до 100)
+- `GET /chats` — `PagedResponse<ChatResponse>` (`page`, `size` до 100, сортировка по `createdAt DESC`)
+- `GET /chats/{chatId}/messages` — `PagedResponse<ChatMessageResponse>` (`page`, `size` до 100, сортировка по `createdAt DESC`)
 
 Справочники (`/dictionaries/**`) и публичные профили (`/profiles/students/{id}`, `/profiles/mentors/{id}`) возвращаются целиком без пагинации.

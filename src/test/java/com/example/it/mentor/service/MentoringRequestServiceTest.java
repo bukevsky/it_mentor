@@ -54,6 +54,7 @@ class MentoringRequestServiceTest {
     @Mock private MentorProfileRepository mentorProfileRepository;
     @Mock private UserService userService;
     @Mock private MentoringRequestMapper mapper;
+    @Mock private ChatService chatService;
 
     private User studentUser;
     private User mentorUser;
