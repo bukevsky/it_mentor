@@ -76,6 +76,7 @@ public class FileStorageService implements FileStorage {
                 .build();
 
         storedFile = storedFileRepository.save(storedFile);
+        log.info("Файл загружен: fileId={}, type={}, size={}, ownerId={}", storedFile.getId(), type, file.getSize(), ownerId);
 
         return new FileUploadResponse(
                 storedFile.getId(),
@@ -109,6 +110,7 @@ public class FileStorageService implements FileStorage {
         }
 
         storedFileRepository.deleteById(fileId);
+        log.info("Файл удалён: fileId={}, storageKey={}, requesterId={}", fileId, file.getStorageKey(), requesterId);
     }
 
     @Override

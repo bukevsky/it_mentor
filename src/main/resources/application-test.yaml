@@ -23,6 +23,8 @@ app:
     bucket-name: itmentor-test
 
 logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n"
   level:
     com.example.it.mentor: DEBUG
     org.springframework.security: WARN

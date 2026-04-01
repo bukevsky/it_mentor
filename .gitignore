@@ -61,6 +61,9 @@ logs/
 *.log
 output.log
 
+# SonarQube plugin binary (скачивается вручную, см. README)
+sonar/plugins/*.jar
+
 # Local
 .DS_Store
 

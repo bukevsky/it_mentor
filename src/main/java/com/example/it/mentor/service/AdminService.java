@@ -13,11 +13,13 @@ import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.repository.UserRepository;
 import com.example.it.mentor.security.UserDetailsServiceImpl;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AdminService {
@@ -30,6 +32,7 @@ public class AdminService {
 
     @Transactional
     public void assignRole(Long userId, RoleCode targetRole) {
+        log.info("Назначение роли пользователю: userId={}, targetRole={}", userId, targetRole);
         if (targetRole == RoleCode.ADMIN) {
             throw new BusinessRuleViolationException("Нельзя назначить роль ADMIN через этот endpoint");
         }
@@ -45,6 +48,7 @@ public class AdminService {
         user.getRoles().removeIf(r -> r.getCode() == targetRole);
         user.getRoles().add(roleToAdd);
         userRepository.save(user);
+        log.info("Роль назначена: userId={}, newRole={}, removedRole={}", userId, targetRole, roleToRemove);
 
         if (targetRole == RoleCode.MENTOR) {
             if (mentorProfileRepository.findByUserId(userId).isEmpty()) {
@@ -60,6 +64,7 @@ public class AdminService {
                         .firstName(firstName)
                         .lastName(lastName)
                         .build());
+                log.debug("Создан профиль ментора при смене роли: userId={}", userId);
             }
         } else {
             if (studentProfileRepository.findByUserId(userId).isEmpty()) {
@@ -75,6 +80,7 @@ public class AdminService {
                         .firstName(firstName)
                         .lastName(lastName)
                         .build());
+                log.debug("Создан профиль студента при смене роли: userId={}", userId);
             }
         }
 
