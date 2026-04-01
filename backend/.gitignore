@@ -1,0 +1,95 @@
+HELP.md
+secret.env
+*.env
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+
+# Nuxt / Node / Vue
+node_modules/
+dist/
+.nuxt/
+.vite/
+.output
+.data
+.nitro
+.cache
+
+# IDE / tooling
+.idea/
+.fleet/
+
+# Logs
+logs/
+*.log
+output.log
+
+# Local
+.DS_Store
+
+# Env
+credentials.env
+.vercel
+nuxt.config.ts
+
+# Java
+.gradle
+**/build/
+!src/**/build/
+
+# Ignore Gradle GUI config
+gradle-app.setting
+
+# Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
+!gradle-wrapper.jar
+
+# Avoid ignore Gradle wrappper properties
+!gradle-wrapper.properties
+
+# Cache of project
+.gradletasknamecache
+
+# JDT-specific (Eclipse Java Development Tools)
+!gradle/wrapper/gradle-wrapper.jar
+
+### STS ###
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/

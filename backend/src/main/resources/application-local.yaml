@@ -4,12 +4,13 @@ logging:
     org.springframework.security: DEBUG
     liquibase: INFO
 
-# Раскомментировать при запуске MailHog (docker-compose up mailhog):
-# spring:
-#   mail:
-#     host: localhost
-#     port: 1025
-#     properties:
-#       mail.smtp.auth: false
-#       mail.smtp.starttls.enable: false
-#       mail.smtp.ssl.enable: false
+spring:
+  mail:
+    host: localhost
+    port: 1025
+    username: noreply@itmentor.local
+    password: ''
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+      mail.smtp.ssl.enable: false

@@ -1,6 +1,5 @@
 import { env } from "@/shared/config/env";
 import { tokenStorage } from "@/shared/lib/token-storage";
-import type { ErrorResponse } from "./contracts";
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
   auth?: boolean;
@@ -9,10 +8,18 @@ interface RequestOptions extends Omit<RequestInit, "body"> {
 
 export class ApiError extends Error {
   status: number;
-  payload: ErrorResponse | null;
+  payload: unknown;
 
-  constructor(status: number, payload: ErrorResponse | null) {
-    super(payload?.message || `Request failed with status ${status}`);
+  constructor(status: number, payload: unknown) {
+    const message =
+      typeof payload === "object" &&
+      payload !== null &&
+      "message" in payload &&
+      typeof payload.message === "string"
+        ? payload.message
+        : `Request failed with status ${status}`;
+
+    super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
@@ -52,7 +59,7 @@ export const request = async <T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     const payload = isJsonContent(response.headers.get("Content-Type"))
-      ? ((await response.json()) as ErrorResponse)
+      ? await response.json()
       : null;
 
     if (response.status === 401) {
@@ -71,4 +78,15 @@ export const request = async <T>(path: string, options: RequestOptions = {}): Pr
   }
 
   return (await response.json()) as T;
+};
+
+export const uploadFile = async <T>(path: string, file: File, auth = true): Promise<T> => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return request<T>(path, {
+    auth,
+    method: "POST",
+    body: formData
+  });
 };

@@ -69,15 +69,30 @@ button {
   padding: 32px;
 }
 
-.workspace-grid {
+.workspace-grid,
+.section-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   margin-top: 20px;
 }
 
+.workspace-stack {
+  display: grid;
+  gap: 20px;
+  margin-top: 20px;
+}
+
 .panel {
   padding: 28px;
+}
+
+.section-card__head {
+  margin-bottom: 10px;
+}
+
+.section-card__description {
+  margin-bottom: 20px;
 }
 
 .eyebrow,
@@ -161,6 +176,15 @@ button {
   gap: 16px;
 }
 
+.form-grid--columns {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.stack {
+  display: grid;
+  gap: 16px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -169,7 +193,9 @@ button {
     font-weight: 600;
   }
 
-  input {
+  input,
+  textarea,
+  select {
     width: 100%;
     padding: 14px 16px;
     border: 1px solid #ced8e6;
@@ -182,6 +208,11 @@ button {
       border-color: #4f7df0;
       box-shadow: 0 0 0 4px rgba(79, 125, 240, 0.12);
     }
+  }
+
+  textarea {
+    min-height: 144px;
+    resize: vertical;
   }
 
   small {
@@ -219,7 +250,8 @@ button {
 }
 
 .error-box,
-.user-card {
+.user-card,
+.json-preview {
   margin-top: 20px;
   padding: 16px 18px;
   border-radius: 18px;
@@ -244,9 +276,47 @@ button {
   }
 }
 
+.json-preview {
+  background: #0f1a2b;
+  color: #e4edf8;
+  overflow: hidden;
+
+  &__title {
+    margin: 0 0 10px;
+    font-weight: 700;
+    color: #9ec0ff;
+  }
+
+  pre {
+    margin: 0;
+    max-height: 420px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88rem;
+    line-height: 1.55;
+  }
+}
+
+.meta-grid--compact {
+  margin: 0;
+}
+
+.upload-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.section-grid--wide {
+  grid-template-columns: 1.25fr 1fr;
+}
+
 @media (max-width: 900px) {
   .hero-card,
-  .workspace-grid {
+  .workspace-grid,
+  .section-grid,
+  .section-grid--wide {
     grid-template-columns: 1fr;
   }
 }

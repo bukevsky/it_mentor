@@ -29,7 +29,7 @@
 ### Предварительные требования
 
 - **Java 25** (или новее)
-- **Maven 3.9+**
+- **Maven 3.9+** (или используйте встроенный `./mvnw`)
 - **Docker** и **Docker Compose** — для PostgreSQL и MinIO
 
 ### 1. Запуск инфраструктуры
@@ -49,13 +49,13 @@ docker compose up -d
 ### 2. Сборка проекта
 
 ```bash
-mvn clean package -DskipTests
+./mvnw clean package -DskipTests
 ```
 
 ### 3. Запуск приложения
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=local
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 Приложение будет доступно по адресу `http://localhost:8080`.
@@ -162,15 +162,36 @@ Query params для поиска: `q`, `skillIds[]`, `cityId`, `recruitmentStatu
 
 Статусы заявки: `SENT` → `REVIEWING` → `NEEDS_CLARIFICATION` → `ACCEPTED` → `COMPLETED`. Терминальные: `REJECTED`, `CANCELLED`.
 
+### Чат (`/chats`)
+
+| Метод  | Путь                                | Доступ | Описание                                       |
+| :----- | :---------------------------------- | :----- | :--------------------------------------------- |
+| `GET`  | `/chats`                            | JWT    | Мои чаты (пагинация по createdAt DESC)         |
+| `GET`  | `/chats/{chatId}`                   | JWT    | Получить чат по ID                             |
+| `GET`  | `/chats/by-request/{requestId}`     | JWT    | Получить чат по ID заявки                      |
+| `GET`  | `/chats/{chatId}/messages`          | JWT    | Сообщения чата (пагинация по createdAt DESC)   |
+| `POST` | `/chats/{chatId}/messages`          | JWT    | Отправить сообщение                            |
+
+Чат создаётся автоматически при принятии заявки на менторство. Доступ только участникам.
+
 ### Файлы (`/files`)
 
-| Метод  | Путь               | Доступ | Описание                                              |
-| :----- | :----------------- | :----- | :---------------------------------------------------- |
-| `POST` | `/files/resume`    | JWT    | Загрузить резюме (PDF, до 5 МБ)                       |
-| `POST` | `/files/portfolio` | JWT    | Загрузить портфолио (PDF/JPEG/PNG, до 10 МБ)          |
-| `POST` | `/files/avatar`    | JWT    | Загрузить аватар (JPEG/PNG/WebP, до 2 МБ)             |
+| Метод  | Путь                       | Доступ | Описание                                              |
+| :----- | :------------------------- | :----- | :---------------------------------------------------- |
+| `POST` | `/files/resume`            | JWT    | Загрузить резюме (PDF, до 5 МБ)                       |
+| `POST` | `/files/portfolio`         | JWT    | Загрузить портфолио (PDF/JPEG/PNG, до 10 МБ)          |
+| `POST` | `/files/avatar`            | JWT    | Загрузить аватар (JPEG/PNG/WebP, до 2 МБ)             |
+| `POST` | `/files/chat-attachment`   | JWT    | Загрузить вложение в чат (любой формат, без ограничений размера) |
 
 Все файлы сохраняются в MinIO. Метаданные (тип, размер, storage key) хранятся в таблице `stored_files`.
+
+### Администрирование (`/admin`)
+
+| Метод | Путь                         | Доступ      | Описание                                            |
+| :---- | :--------------------------- | :---------- | :-------------------------------------------------- |
+| `PUT` | `/admin/users/{userId}/role` | JWT (ADMIN) | Назначить пользователю роль (STUDENT или MENTOR)    |
+
+Логика: роли STUDENT и MENTOR взаимоисключающие. При назначении MENTOR роль STUDENT снимается (и наоборот). Назначить ADMIN через этот endpoint нельзя (422). Автоматически создаёт профиль при необходимости.
 
 ---
 
@@ -197,8 +218,8 @@ Query params для поиска: `q`, `skillIds[]`, `cityId`, `recruitmentStatu
 com.example.it.mentor
 ├── config/              Конфигурация (Security, JPA, OpenAPI, Storage)
 ├── security/            JWT-фильтр, провайдер, обработчики 401/403
-├── controller/          REST-контроллеры (7 шт.)
-├── service/             Бизнес-логика (9 шт.)
+├── controller/          REST-контроллеры (9 шт.)
+├── service/             Бизнес-логика (11 шт.)
 ├── repository/          Spring Data JPA репозитории (15 шт.) + MentorProfileSpecification
 ├── entity/              JPA-сущности (15 шт.)
 │   ├── dict/            Справочники (City, Skill, Language, InteractionType)
@@ -235,8 +256,8 @@ com.example.it.mentor
 | Роль      | Описание                                               |
 | :-------- | :----------------------------------------------------- |
 | `STUDENT` | Роль по умолчанию. Создание профиля, загрузка резюме    |
-| `MENTOR`  | Создание менторского профиля, управление навыками        |
-| `ADMIN`   | Административный доступ (расширение в будущих этапах)    |
+| `MENTOR`  | Назначается администратором. Создание менторского профиля, управление заявками. |
+| `ADMIN`   | Управление ролями пользователей через `/admin/**`.       |
 
 ### Обработка ошибок
 
@@ -281,9 +302,11 @@ users ──< user_roles >── roles
   ├── mentor_profiles ──< mentor_skills >── dict_skill
   │       └──── dict_city
   │
-  ├── stored_files (resume, portfolio, avatar)
+  ├── stored_files (resume, portfolio, avatar, chat_attachment)
   │
-  └── mentoring_requests (student_profile_id, mentor_profile_id)
+  ├── mentoring_requests (student_profile_id, mentor_profile_id)
+  │
+  └── chats ──< chat_messages (chatId, senderUserId, body, attachmentFileId)
 ```
 
 ### Миграции
@@ -304,6 +327,9 @@ Liquibase-миграции расположены в `src/main/resources/db/chan
 | `010_add_mentor_search_indexes.sql` | Индексы для поиска менторов: status, type, channel, GIN-тргм по имени |
 | `011_add_version_columns.sql`    | Оптимистичная блокировка: колонки `version` в users, profiles        |
 | `012_create_mentoring_requests.sql` | Таблица `mentoring_requests` + индексы по mentor/student + статусу  |
+| `013_update_password_reset_tokens.sql` | OTP: поле `code` (6 цифр), `attempts`, длина токена изменена |
+| `014_create_chats.sql`              | Таблица `chats` (mentoringRequestId, studentUserId, mentorUserId)   |
+| `015_create_chat_messages.sql`      | Таблица `chat_messages` (chatId, senderUserId, body, attachmentFileId) |
 
 Миграции выполняются автоматически при запуске с профилем `local` или `test`.
 
@@ -390,8 +416,8 @@ it.mentor/
 │   │   ├── Application.java
 │   │   ├── config/                    (5 классов)
 │   │   ├── security/                  (5 классов)
-│   │   ├── controller/                (7 контроллеров)
-│   │   ├── service/                   (9 сервисов)
+│   │   ├── controller/                (9 контроллеров)
+│   │   ├── service/                   (11 сервисов)
 │   │   ├── repository/                (15 репозиториев + 1 Specification)
 │   │   ├── entity/                    (8 сущностей + dict/ + enums/)
 │   │   ├── dto/                       (35 records)
@@ -404,7 +430,7 @@ it.mentor/
 │       ├── application-test.yaml
 │       └── db/changelog/
 │           ├── db.changelog-master.yaml
-│           └── changes/               (12 SQL-миграций)
+│           └── changes/               (15 SQL-миграций)
 │
 └── src/test/java/com/example/it/mentor/
     ├── ApplicationTests.java
@@ -421,13 +447,13 @@ it.mentor/
 | Категория               | Количество |
 | :---------------------- | :--------- |
 | Java-файлы (main)       | 125        |
-| Тестовые классы          | 24         |
-| Тестов (JUnit 5)         | 329        |
-| REST-эндпоинтов          | 29         |
-| Таблиц в БД             | 18         |
-| SQL-миграций             | 12         |
-| Контроллеров             | 7          |
-| Сервисов                 | 9          |
+| Тестовые классы          | ~27        |
+| Тестов (JUnit 5)         | 217        |
+| REST-эндпоинтов          | ~36        |
+| Таблиц в БД             | 20         |
+| SQL-миграций             | 15         |
+| Контроллеров             | 9          |
+| Сервисов                 | 11         |
 | Репозиториев             | 15         |
 | JPA-сущностей            | 15         |
 | Перечислений (enum)      | 15         |
@@ -442,4 +468,6 @@ it.mentor/
 - [x] **Stage 2** — Справочники, профили студента/ментора, загрузка файлов
 - [x] **Stage 3** — Поиск менторов: фильтрация, пагинация, двухфазная загрузка, GIN-индекс
 - [x] **Stage 4** — Система заявок на менторство: двунаправленные заявки, state machine, 7 статусов
-- [ ] **Stage 5** — Уведомления, чат, отзывы
+- [x] **Stage 5** — OTP сброс пароля (6-значный код на email, 3 попытки, 15 минут TTL)
+- [x] **Stage 6** — Чат: автосоздание при принятии заявки, сообщения, вложения
+- [ ] **Stage 7** — Админ-панель, поиск студентов, уведомления, отзывы

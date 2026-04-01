@@ -1,43 +1,59 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import type { UserInfo } from "@/entities/user/model/types";
-import type { ErrorResponse, LoginRequest } from "@/shared/api/contracts";
+import type {
+  ErrorResponse,
+  ForgotPasswordRequest,
+  HealthResponse,
+  LoginRequest,
+  RegisterRequest,
+  ResetPasswordRequest
+} from "@/shared/api/contracts";
 import { ApiError } from "@/shared/api/http";
+import { buildFieldErrors, isErrorResponse, isHealthResponse, normalizeErrorResponse } from "@/shared/lib/api-errors";
 import { tokenStorage } from "@/shared/lib/token-storage";
 import { authApi } from "../api/auth-api";
 
 type BackendHealth = "idle" | "checking" | "up" | "down";
 
-const buildFieldErrors = (details?: string[]) => {
-  return (details || []).reduce<Record<string, string>>((accumulator, detail) => {
-    const [field, ...messageParts] = detail.split(":");
-
-    if (!field || messageParts.length === 0) {
-      return accumulator;
-    }
-
-    accumulator[field.trim()] = messageParts.join(":").trim();
-    return accumulator;
-  }, {});
+const isBackendReachable = (health: HealthResponse) => {
+  return (
+    health.status === "UP" ||
+    health.components?.readinessState?.status === "UP" ||
+    health.components?.db?.status === "UP"
+  );
 };
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<UserInfo | null>(null);
+  const sessionToken = ref(tokenStorage.get());
   const isInitializing = ref(true);
   const isSubmitting = ref(false);
+  const isRecoveringPassword = ref(false);
   const error = ref<ErrorResponse | null>(null);
   const backendHealth = ref<BackendHealth>("idle");
 
-  const isAuthenticated = computed(() => Boolean(user.value && tokenStorage.get()));
+  const isAuthenticated = computed(() => Boolean(user.value && sessionToken.value));
   const fieldErrors = computed(() => buildFieldErrors(error.value?.details));
-  const hasSession = computed(() => Boolean(tokenStorage.get()));
+  const hasSession = computed(() => Boolean(sessionToken.value));
 
   const setError = (nextError: ErrorResponse | null) => {
     error.value = nextError;
   };
 
-  const clearSession = () => {
+  const setSessionToken = (nextToken: string | null) => {
+    sessionToken.value = nextToken;
+
+    if (nextToken) {
+      tokenStorage.set(nextToken);
+      return;
+    }
+
     tokenStorage.clear();
+  };
+
+  const clearSession = () => {
+    setSessionToken(null);
     user.value = null;
   };
 
@@ -46,14 +62,19 @@ export const useAuthStore = defineStore("auth", () => {
 
     try {
       const response = await authApi.getHealth();
-      backendHealth.value = response.status === "UP" ? "up" : "down";
-    } catch {
+      backendHealth.value = isBackendReachable(response) ? "up" : "down";
+    } catch (rawError) {
+      if (rawError instanceof ApiError && isHealthResponse(rawError.payload)) {
+        backendHealth.value = isBackendReachable(rawError.payload) ? "up" : "down";
+        return;
+      }
+
       backendHealth.value = "down";
     }
   };
 
   const fetchCurrentUser = async () => {
-    if (!tokenStorage.get()) {
+    if (!sessionToken.value) {
       user.value = null;
       return null;
     }
@@ -66,7 +87,7 @@ export const useAuthStore = defineStore("auth", () => {
     } catch (rawError) {
       clearSession();
 
-      if (rawError instanceof ApiError) {
+      if (rawError instanceof ApiError && isErrorResponse(rawError.payload)) {
         setError(rawError.payload);
       }
 
@@ -87,27 +108,60 @@ export const useAuthStore = defineStore("auth", () => {
 
     try {
       const response = await authApi.login(payload);
-      tokenStorage.set(response.accessToken);
+      setSessionToken(response.accessToken);
       user.value = response.user;
       return response.user;
     } catch (rawError) {
       clearSession();
-
-      if (rawError instanceof ApiError) {
-        setError(rawError.payload);
-      } else {
-        setError({
-          timestamp: new Date().toISOString(),
-          status: 0,
-          error: "NETWORK_ERROR",
-          message: "Не удалось выполнить запрос к backend",
-          path: "/auth/login"
-        });
-      }
+      setError(normalizeErrorResponse(rawError, "/auth/login"));
 
       return null;
     } finally {
       isSubmitting.value = false;
+    }
+  };
+
+  const register = async (payload: RegisterRequest) => {
+    isSubmitting.value = true;
+    setError(null);
+
+    try {
+      return await authApi.register(payload);
+    } catch (rawError) {
+      setError(normalizeErrorResponse(rawError, "/auth/register"));
+      return null;
+    } finally {
+      isSubmitting.value = false;
+    }
+  };
+
+  const forgotPassword = async (payload: ForgotPasswordRequest) => {
+    isRecoveringPassword.value = true;
+    setError(null);
+
+    try {
+      await authApi.forgotPassword(payload);
+      return true;
+    } catch (rawError) {
+      setError(normalizeErrorResponse(rawError, "/auth/password/forgot"));
+      return false;
+    } finally {
+      isRecoveringPassword.value = false;
+    }
+  };
+
+  const resetPassword = async (payload: ResetPasswordRequest) => {
+    isRecoveringPassword.value = true;
+    setError(null);
+
+    try {
+      await authApi.resetPassword(payload);
+      return true;
+    } catch (rawError) {
+      setError(normalizeErrorResponse(rawError, "/auth/password/reset"));
+      return false;
+    } finally {
+      isRecoveringPassword.value = false;
     }
   };
 
@@ -123,12 +177,18 @@ export const useAuthStore = defineStore("auth", () => {
     hasSession,
     isAuthenticated,
     isInitializing,
+    isRecoveringPassword,
     isSubmitting,
     user,
     checkBackendHealth,
     fetchCurrentUser,
+    forgotPassword,
     initialize,
     login,
     logout
+    ,
+    register,
+    resetPassword,
+    setError
   };
 });

@@ -80,4 +80,17 @@ public class FileController {
         userService.linkAvatar(user.getId(), response.id());
         return response;
     }
+
+    /**
+     * Загружает вложение для чата.
+     *
+     * @param file любой файл
+     * @return метаданные загруженного файла
+     */
+    @PostMapping(value = "/chat-attachment", consumes = MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public FileUploadResponse uploadChatAttachment(@RequestParam("file") MultipartFile file) {
+        User user = userService.getCurrentUserEntity();
+        return fileStorage.store(file, FileType.ATTACHMENT, user.getId());
+    }
 }

@@ -2,12 +2,7 @@
 
 Frontend-часть проекта IT Mentor на `Vue 3`, `TypeScript`, `Pinia` и `Vite`.
 
-Сейчас в проекте собран базовый клиентский каркас для интеграции с backend:
-- общий HTTP-клиент;
-- auth API-слой;
-- auth store на Pinia;
-- стартовый экран для проверки связки с backend;
-- proxy для локальной разработки через Vite.
+Сейчас фронт собран как typed workbench под полный контракт из [backend/README_FRONT.md](/Users/yar_shpep/Documents/УЧЕБА/Практика/it_mentor/backend/README_FRONT.md). Backend не меняется и используется только как read-only API.
 
 ## Стек
 
@@ -18,6 +13,21 @@ Frontend-часть проекта IT Mentor на `Vue 3`, `TypeScript`, `Pinia`
 - `Vite`
 - `SCSS`
 
+## Что покрыто
+
+Реализованы API-модули и обзорные экраны для всех разделов guide:
+
+- `Auth`: register, login, me, forgot/reset password, health
+- `Dictionaries`: cities, skills, languages, interaction types
+- `Profile Summary`: `GET /profile/me`
+- `Student Profile`: upsert, my profile, public by id
+- `Mentor Profile`: upsert, my profile, public by id
+- `Mentor Search`: `GET /profiles/mentors`
+- `Files`: resume, portfolio, avatar, chat attachment
+- `Mentoring Requests`: create, list, by id, view, clarify, accept, reject, cancel, complete
+- `Chat`: list, by id, by request id, messages, send message
+- `Admin`: assign role
+
 ## Структура
 
 ```text
@@ -26,11 +36,22 @@ frontend/
 │   ├── entities/
 │   │   └── user/
 │   ├── features/
-│   │   └── auth/
+│   │   ├── admin/
+│   │   ├── auth/
+│   │   ├── chat/
+│   │   ├── dictionaries/
+│   │   ├── files/
+│   │   ├── mentor-profile/
+│   │   ├── mentoring/
+│   │   ├── profile-summary/
+│   │   └── student-profile/
 │   ├── shared/
 │   │   ├── api/
 │   │   ├── config/
-│   │   └── lib/
+│   │   ├── lib/
+│   │   └── ui/
+│   ├── widgets/
+│   │   └── api-workbench/
 │   ├── App.vue
 │   ├── main.ts
 │   └── style.scss
@@ -42,15 +63,13 @@ frontend/
 
 ## Архитектура
 
-Проект разделён по зонам ответственности:
+- `shared/api` хранит DTO, query helpers и HTTP-клиент.
+- `shared/lib` содержит инфраструктурные утилиты: парсинг JSON, нормализацию ошибок, token storage.
+- `features/*/api` изолируют вызовы backend по предметным зонам.
+- `features/*/ui` показывают отдельные workbench-секции для конкретных эндпоинтов.
+- `widgets/api-workbench` собирает единый shell приложения.
 
-- `entities` — базовые доменные типы;
-- `features` — прикладные пользовательские сценарии;
-- `shared/api` — HTTP-клиент, контракты и обработка ошибок;
-- `shared/config` — конфигурация окружения;
-- `shared/lib` — инфраструктурные утилиты, например хранение токена.
-
-Такой расклад нужен, чтобы UI не зависел от деталей backend-реализации, а интеграция шла через типизированный API-слой.
+Такой расклад держит интеграцию типизированной и не смешивает UI с деталями transport layer.
 
 ## Переменные окружения
 
@@ -102,24 +121,11 @@ npm run build
 Frontend browser -> /api/* -> Vite proxy -> http://localhost:8080/*
 ```
 
-Сейчас реализованы и проверены:
+JWT сохраняется на фронте в `sessionStorage` через `tokenStorage`.
 
-- `POST /auth/login`
-- `GET /auth/me`
-- `GET /actuator/health`
+## Ограничения
 
-JWT сохраняется на фронте в `sessionStorage`.
-
-## Что важно знать
-
-- Backend в этой связке не меняется и рассматривается как внешний API.
-- Если `actuator/health` возвращает `503`, это не всегда означает, что backend полностью недоступен.
-  Например, API может работать, а общий health быть `DOWN` из-за почты или другой необязательной зависимости.
-- Загрузка файлов требует работающего `MinIO`.
-
-## Ближайшее развитие
-
-- добавить `vue-router` и защищённые маршруты;
-- вынести auth flow в отдельные страницы;
-- расширить API-слой профилями, справочниками и поиском менторов;
-- подключить UI-kit после получения доступа к библиотеке.
+- Это не финальный продуктовый UI, а инженерный workbench для полного покрытия backend-контракта.
+- Загрузка файлов зависит от работающего `MinIO`.
+- Если `actuator/health` возвращает `503`, часть API всё ещё может быть доступна.
+- UI-kit пока не подключён, потому что доступ к внешнему приватному репозиторию не выдан.

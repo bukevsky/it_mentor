@@ -1,14 +1,5 @@
-export type UserRole = "STUDENT" | "MENTOR" | "ADMIN";
+import type { RoleCode, UserInfoResponse, UserStatus } from "@/shared/api/contracts";
 
-export type UserStatus =
-  | "ACTIVE"
-  | "EMAIL_NOT_CONFIRMED"
-  | "BLOCKED"
-  | "DELETED";
-
-export interface UserInfo {
-  id: number;
-  email: string;
-  roles: UserRole[];
-  status: UserStatus;
-}
+export type UserRole = RoleCode;
+export type { UserStatus };
+export type UserInfo = UserInfoResponse;
