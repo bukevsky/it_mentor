@@ -48,6 +48,7 @@ public class MentoringRequestService {
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
     private final MentoringRequestMapper mapper;
+    private final ChatService chatService;
 
     @Transactional
     public MentoringRequestResponse createRequest(MentoringRequestCreateRequest dto) {
@@ -64,18 +65,18 @@ public class MentoringRequestService {
         MentorProfile mentorProfile;
         MentoringRequestDirection direction;
 
-        if (isStudent) {
-            direction = MentoringRequestDirection.STUDENT_TO_MENTOR;
-            studentProfile = studentProfileRepository.findByUserId(currentUser.getId())
-                    .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
-            mentorProfile = mentorProfileRepository.findById(dto.targetProfileId())
-                    .orElseThrow(() -> new NotFoundException("Профиль ментора не найден: " + dto.targetProfileId()));
-        } else {
+        if (isMentor) {
             direction = MentoringRequestDirection.MENTOR_TO_STUDENT;
             mentorProfile = mentorProfileRepository.findByUserId(currentUser.getId())
                     .orElseThrow(() -> new NotFoundException("Профиль ментора не найден"));
             studentProfile = studentProfileRepository.findById(dto.targetProfileId())
                     .orElseThrow(() -> new NotFoundException("Профиль студента не найден: " + dto.targetProfileId()));
+        } else {
+            direction = MentoringRequestDirection.STUDENT_TO_MENTOR;
+            studentProfile = studentProfileRepository.findByUserId(currentUser.getId())
+                    .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
+            mentorProfile = mentorProfileRepository.findById(dto.targetProfileId())
+                    .orElseThrow(() -> new NotFoundException("Профиль ментора не найден: " + dto.targetProfileId()));
         }
 
         if (Objects.equals(studentProfile.getUser().getId(), mentorProfile.getUser().getId())) {
@@ -184,6 +185,7 @@ public class MentoringRequestService {
         request.setStatus(ACCEPTED);
         request.setRespondedAt(OffsetDateTime.now());
         requestRepository.save(request);
+        chatService.createForRequest(request);
         return mapper.toResponse(request);
     }
 
