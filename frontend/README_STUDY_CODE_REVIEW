@@ -1,0 +1,1120 @@
+# README_STUDY_CODE_REVIEW
+
+## 1. Scope
+
+Документ фиксирует текущую техническую реализацию `frontend/`:
+
+- runtime-конфигурацию;
+- структуру исходного кода;
+- схему интеграции с backend;
+- транспортный слой;
+- state management;
+- маршрутизацию;
+- реализацию экранов;
+- тестовый контур;
+- архитектурные ограничения.
+
+Описание опирается на фактическое состояние кода в папке `frontend/`.
+
+---
+
+## 2. Runtime Configuration
+
+### 2.1. Toolchain
+
+`frontend/package.json`
+
+- `vue@3.4.x`
+- `typescript@5.3.x`
+- `pinia@2.1.x`
+- `vue-router@4.3.x`
+- `vite@5.4.x`
+- `sass`
+- `@playwright/test`
+- `conductor`
+
+### 2.2. Node.js Requirement
+
+```json
+"engines": {
+  "node": ">=20.0.0"
+}
+```
+
+### 2.3. Available Scripts
+
+| Script | Назначение |
+|---|---|
+| `npm run dev` | локальный dev server |
+| `npm run build` | typecheck + production build |
+| `npm run preview` | preview production build |
+| `npm run typecheck` | `vue-tsc --noEmit` |
+| `npm run test:e2e` | Playwright e2e |
+| `npm run test:e2e:ui` | Playwright UI mode |
+| `npm run test:e2e:update` | обновление snapshot-файлов |
+| `npm run test:e2e:headed` | headed e2e-run |
+
+---
+
+## 3. Deployment and Network Topology
+
+### 3.1. Environment Variables
+
+`frontend/.env.example`
+
+```env
+VITE_API_BASE_URL=/api
+VITE_DEV_PROXY_TARGET=http://localhost:8080
+```
+
+### 3.2. Vite Proxy
+
+`frontend/vite.config.ts`
+
+```ts
+proxy: {
+  "/api": {
+    target: env.VITE_DEV_PROXY_TARGET || "http://localhost:8080",
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/api/, "")
+  }
+}
+```
+
+### 3.3. Request Path Resolution
+
+Во frontend все HTTP-запросы формируются относительно `VITE_API_BASE_URL`, по умолчанию `/api`.
+Во время локальной разработки это приводит к следующей цепочке:
+
+```text
+Browser -> /api/** -> Vite proxy -> http://localhost:8080/**
+```
+
+Префикс `/api` существует только на стороне frontend-dev-runtime и не присутствует в конечном backend route space.
+
+### 3.4. External Runtime Dependencies
+
+Из корневого `docker-compose.yml` следует, что серверная часть ориентируется на:
+
+- PostgreSQL
+- MinIO
+
+Фронтенд напрямую с этими сервисами не взаимодействует; доступ к ним инкапсулирован backend-слоем.
+
+---
+
+## 4. Source Tree
+
+```text
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── layouts/
+│   │   └── router/
+│   ├── entities/
+│   │   └── user/
+│   ├── features/
+│   │   ├── admin/
+│   │   ├── auth/
+│   │   ├── chat/
+│   │   ├── dictionaries/
+│   │   ├── files/
+│   │   ├── mentor-profile/
+│   │   ├── mentoring/
+│   │   ├── profile/
+│   │   ├── profile-summary/
+│   │   └── student-profile/
+│   ├── pages/
+│   ├── shared/
+│   │   ├── api/
+│   │   ├── config/
+│   │   ├── lib/
+│   │   └── ui/
+│   ├── App.vue
+│   ├── main.ts
+│   └── style.scss
+├── docs/
+├── tests/
+├── package.json
+├── vite.config.ts
+└── playwright.config.ts
+```
+
+### 4.1. Layer Responsibilities
+
+| Layer | Responsibility |
+|---|---|
+| `app/` | bootstrap, layout, router |
+| `entities/` | базовые доменные типы |
+| `features/*/api` | backend endpoint wrappers |
+| `features/*/model` | feature state and orchestration |
+| `pages/` | route-level presentation |
+| `shared/api` | HTTP transport, query utils, DTO contracts |
+| `shared/config` | runtime environment mapping |
+| `shared/lib` | token storage, error normalization, presenters |
+| `shared/ui` | reusable presentational blocks |
+
+Текущая организация близка к упрощенной feature-sliced композиции, но без полного разделения на `ui/model/api` внутри каждой фичи.
+
+---
+
+## 5. Application Bootstrap
+
+### 5.1. Entry Point
+
+`src/main.ts`
+
+Bootstrap-последовательность:
+
+1. `createApp(App)`
+2. `app.use(createPinia())`
+3. `app.use(router)`
+4. import глобальных стилей
+5. mount в `#app`
+
+### 5.2. Root Component Initialization
+
+`src/App.vue`
+
+При `onMounted()` выполняются две асинхронные операции верхнего уровня:
+
+- `authStore.initialize()`
+- `dictionariesStore.loadAll()`
+
+Это означает, что на старте приложения:
+
+- выполняется проверка доступности backend;
+- восстанавливается пользовательская сессия по токену;
+- предзагружаются словари для форм и фильтров.
+
+### 5.3. Theme Runtime
+
+Приложение оборачивается в `ThemeProvider` из `conductor`.
+Переключение темы реализовано на уровне layout через `useTheme()`.
+
+---
+
+## 6. Routing
+
+### 6.1. Route Table
+
+`src/app/router/index.ts`
+
+| Path | Name | Component |
+|---|---|---|
+| `/` | `home` | `HomePage.vue` |
+| `/auth` | `auth` | `AuthPage.vue` |
+| `/profile` | `profile` | `ProfilePage.vue` |
+| `/mentors` | `mentors` | `MentorsPage.vue` |
+| `/requests` | `requests` | `RequestsPage.vue` |
+| `/chat` | `chat` | `ChatPage.vue` |
+| `/files` | `files` | `FilesPage.vue` |
+
+### 6.2. Router Characteristics
+
+Текущая реализация намеренно простая:
+
+- используется `createWebHistory()`;
+- отсутствуют lazy-loaded route chunks;
+- отсутствуют глобальные guards;
+- контроль доступа реализован на уровне route components.
+
+### 6.3. Meta Usage
+
+Каждый route содержит `meta.title` и `meta.description`.
+`meta.title` используется в layout для заголовка текущего экрана.
+
+---
+
+## 7. Shell Layout
+
+### 7.1. `MainLayout.vue`
+
+Функции shell-слоя:
+
+- sidebar navigation;
+- route switch via `RouterView`;
+- theme toggle;
+- sidebar collapse/expand;
+- logout action;
+- page title derivation from route meta.
+
+### 7.2. Navigation Model
+
+Sidebar items формируются через `computed`.
+При `isAuthenticated === true` из списка исключается `auth`.
+
+### 7.3. Layout State
+
+Локальное UI-состояние layout:
+
+- `isSidebarVisible`
+- derived theme mode
+- derived page title
+
+Layout не хранит feature-state и не содержит предметной логики, кроме logout orchestration.
+
+---
+
+## 8. Transport Layer
+
+### 8.1. Environment Mapping
+
+`src/shared/config/env.ts`
+
+```ts
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
+
+export const env = {
+  apiBaseUrl: trimTrailingSlash(import.meta.env.VITE_API_BASE_URL || "/api")
+};
+```
+
+Runtime-конфигурация централизована и исключает дублирование базового URL в feature-модулях.
+
+### 8.2. HTTP Client
+
+`src/shared/api/http.ts`
+
+`request<T>()` реализует:
+
+- URL assembly: `${env.apiBaseUrl}${path}`;
+- условное добавление `Authorization`;
+- условное добавление `Content-Type: application/json`;
+- JSON serialization для object-body;
+- transparent pass-through для `FormData`;
+- typed response parsing;
+- special handling для `204 No Content`;
+- обработку не-JSON response;
+- унифицированное исключение `ApiError`.
+
+### 8.3. Authorization Header Injection
+
+```ts
+if (auth) {
+  const token = tokenStorage.get();
+  if (token) {
+    normalizedHeaders.set("Authorization", `Bearer ${token}`);
+  }
+}
+```
+
+По умолчанию запросы считаются защищенными (`auth = true`), если иное не указано явно.
+
+### 8.4. Error Semantics
+
+При неуспешном ответе выбрасывается `ApiError`, содержащий:
+
+- `status`
+- `payload`
+- `message`
+
+Сообщение извлекается из `payload.message`, если backend вернул типовой error envelope.
+
+### 8.5. 401 Handling
+
+На transport-level при `401` выполняется `tokenStorage.clear()`.
+Таким образом клиентский auth-state сбрасывается до реакции UI.
+
+### 8.6. File Upload Transport
+
+`uploadFile<T>()` использует `FormData` и переиспользует базовый `request()`.
+
+Это исключает дублирование multipart-логики в feature API.
+
+---
+
+## 9. Query Utilities
+
+`src/shared/api/query.ts`
+
+`buildQuery()`:
+
+- игнорирует `undefined`, `null`, `""`;
+- поддерживает scalar values;
+- поддерживает array values через повторяющиеся query keys;
+- возвращает либо `?key=value...`, либо пустую строку.
+
+Используется в:
+
+- mentor search;
+- request list;
+- chat list/messages.
+
+---
+
+## 10. Contract Layer
+
+### 10.1. DTO Centralization
+
+`src/shared/api/contracts.ts` содержит frontend representation backend DTO.
+
+В одном файле сосредоточены:
+
+- auth contracts;
+- health contracts;
+- dictionaries contracts;
+- student and mentor profile contracts;
+- request contracts;
+- chat contracts;
+- file upload contracts;
+- common enums;
+- paginated responses;
+- error payloads.
+
+### 10.2. Architectural Consequence
+
+Feature-модули не определяют локальные ad hoc interfaces.
+Вся типизация backend-связанных структур проходит через единый контрактный слой.
+
+Это упрощает:
+
+- cross-feature refactoring;
+- type navigation;
+- проверку соответствия backend guide;
+- статический анализ.
+
+### 10.3. Enum Mapping
+
+Backend enum values (`OPEN`, `INTERNSHIP`, `CONFIDENT`, `NEEDS_CLARIFICATION` и т.д.) не используются в UI напрямую.
+Они маппятся в display-label через `shared/lib/options.ts`.
+
+---
+
+## 11. Token Storage
+
+`src/shared/lib/token-storage.ts`
+
+Характеристики реализации:
+
+- storage key: `it-mentor.access-token`
+- primary storage: `sessionStorage`
+- fallback: in-memory variable
+
+### 11.1. Rationale
+
+Выбор `sessionStorage` означает:
+
+- сохранение токена при reload текущей вкладки;
+- отсутствие долгоживущего хранения между отдельными browser sessions;
+- минимальную сложность по сравнению с cookie/session-backend.
+
+---
+
+## 12. Error Normalization Layer
+
+`src/shared/lib/api-errors.ts`
+
+Реализованы:
+
+- runtime type guards;
+- `normalizeErrorResponse()`;
+- `buildFieldErrors()`.
+
+### 12.1. Normalization Strategy
+
+Если backend вернул типовой `ErrorResponse`, он пробрасывается как есть.
+Если произошла network/runtime ошибка, строится синтетический fallback:
+
+- `status: 0`
+- `error: NETWORK_ERROR` или `UNKNOWN_ERROR`
+- `message`
+- `path`
+
+### 12.2. Field-Level Validation Mapping
+
+`details[]` с backend преобразуется в словарь:
+
+```ts
+Record<string, string>
+```
+
+Это используется в auth-формах для привязки validation errors к полям ввода.
+
+---
+
+## 13. Presentation Helpers
+
+### 13.1. `shared/lib/options.ts`
+
+Содержит нормализованные options arrays для:
+
+- ролей;
+- статусов заявок;
+- типов менторства;
+- каналов взаимодействия;
+- статусов набора;
+- форматов работы;
+- уровней языков;
+- уровней навыков;
+- уровней/форм образования.
+
+### 13.2. `shared/lib/presenters.ts`
+
+Содержит presentation helpers:
+
+- `getOptionLabel()`
+- `formatDateTime()`
+- `formatList()`
+- `fullName()`
+
+Тем самым представление enum/data formatting не размазывается по route components.
+
+---
+
+## 14. State Management
+
+Все store реализованы через setup-style `defineStore()`.
+Общий шаблон:
+
+- `ref`/`reactive` для состояния;
+- `computed` для derived state;
+- async actions;
+- единая error model;
+- explicit loading/busy flags.
+
+### 14.1. `auth-store`
+
+`src/features/auth/model/auth-store.ts`
+
+#### Responsibility
+
+- backend health probing;
+- session bootstrap;
+- token lifecycle;
+- current user hydration;
+- login/register/reset flows;
+- logout.
+
+#### State
+
+- `user`
+- `sessionToken`
+- `isInitializing`
+- `isSubmitting`
+- `isRecoveringPassword`
+- `error`
+- `backendHealth`
+
+#### Derived State
+
+- `isAuthenticated`
+- `fieldErrors`
+- `hasSession`
+
+#### Critical Flow
+
+`initialize()`:
+
+1. `checkBackendHealth()`
+2. `fetchCurrentUser()`
+3. toggles `isInitializing`
+
+Это делает store единственной точкой входа в auth bootstrap.
+
+### 14.2. `dictionaries-store`
+
+`src/features/dictionaries/model/dictionaries-store.ts`
+
+#### Responsibility
+
+Загрузка и хранение reference data:
+
+- cities
+- skills
+- languages
+- interaction types
+
+#### Implementation Detail
+
+`loadAll()` использует `Promise.all()`, что минимизирует cold-start latency словарного слоя.
+
+### 14.3. `profiles-store`
+
+`src/features/profile/model/profiles-store.ts`
+
+#### Responsibility
+
+- orchestration student/mentor profile screen;
+- form state persistence;
+- DTO assembly;
+- response-to-form patching;
+- profile load/save actions.
+
+#### Notable Design Choices
+
+- Форменные модели хранятся в store, а не в page component.
+- Для каждого профиля есть отдельный payload builder.
+- Patch-методы синхронизируют backend DTO и reactive form state.
+- `404` при чтении профиля интерпретируется как "profile missing", а не как критическая ошибка.
+
+#### Stored Forms
+
+- `studentForm`
+- `mentorForm`
+
+#### Stored DTO Snapshots
+
+- `studentProfile`
+- `mentorProfile`
+
+### 14.4. `mentor-directory-store`
+
+`src/features/mentor-profile/model/mentor-directory-store.ts`
+
+#### Responsibility
+
+- mentor search filters;
+- search result pagination payload;
+- selected mentor state;
+- mentoring request draft;
+- request submission.
+
+#### Main Flow
+
+`searchMentors()`:
+
+- собирает `MentorSearchParams`;
+- исключает пустые значения;
+- вызывает `mentorProfileApi.search()`;
+- сохраняет `PagedResponse<MentorCardResponse>`.
+
+`submitRequest()`:
+
+- валидирует `selectedMentor`;
+- строит `MentoringRequestCreateRequest`;
+- вызывает `mentoringApi.create()`.
+
+### 14.5. `requests-store`
+
+`src/features/mentoring/model/requests-store.ts`
+
+#### Responsibility
+
+- request list filtering;
+- request detail selection;
+- state transition actions.
+
+#### Transition Operations
+
+- `markViewed`
+- `acceptRequest`
+- `clarifyRequest`
+- `rejectRequest`
+- `cancelRequest`
+- `completeRequest`
+
+#### Internal Abstraction
+
+`runRequestAction()` инкапсулирует общий алгоритм transition execution:
+
+- busy flag;
+- error reset;
+- success message;
+- active request refresh;
+- list refresh.
+
+Это сокращает дублирование по action handlers.
+
+### 14.6. `chat-store`
+
+`src/features/chat/model/chat-store.ts`
+
+#### Responsibility
+
+- chat list retrieval;
+- active chat retrieval;
+- message list retrieval;
+- lookup by request id;
+- message sending.
+
+#### State
+
+- `form`
+- `chats`
+- `activeChat`
+- `messages`
+- `error`
+- `successMessage`
+- `isBusy`
+
+#### Integration Note
+
+`form.attachmentFileId` связывает chat flow с files upload flow.
+
+### 14.7. `files-store`
+
+`src/features/files/model/files-store.ts`
+
+#### Responsibility
+
+- local file selection state;
+- upload dispatch by file type;
+- upload result retention.
+
+#### Upload Types
+
+- `resume`
+- `portfolio`
+- `avatar`
+- `chat-attachment`
+
+#### Implementation Detail
+
+Store держит `selectedFiles` как keyed map и `responses` как partial keyed map upload results.
+
+---
+
+## 15. Feature API Modules
+
+Feature API-модули представляют thin wrapper над `request()` и не содержат UI/state-логики.
+
+### 15.1. Auth API
+
+`src/features/auth/api/auth-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `register()` | `POST /auth/register` |
+| `login()` | `POST /auth/login` |
+| `getCurrentUser()` | `GET /auth/me` |
+| `forgotPassword()` | `POST /auth/password/forgot` |
+| `resetPassword()` | `POST /auth/password/reset` |
+| `getHealth()` | `GET /actuator/health` |
+
+### 15.2. Dictionaries API
+
+`src/features/dictionaries/api/dictionaries-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `getCities()` | `GET /dictionaries/cities` |
+| `getSkills()` | `GET /dictionaries/skills` |
+| `getLanguages()` | `GET /dictionaries/languages` |
+| `getInteractionTypes()` | `GET /dictionaries/interaction-types` |
+
+### 15.3. Student Profile API
+
+`src/features/student-profile/api/student-profile-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `upsert()` | `PUT /profile/student` |
+| `getMine()` | `GET /profile/student/me` |
+| `getById()` | `GET /profiles/students/{id}` |
+
+### 15.4. Mentor Profile API
+
+`src/features/mentor-profile/api/mentor-profile-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `upsert()` | `PUT /profile/mentor` |
+| `getMine()` | `GET /profile/mentor/me` |
+| `getById()` | `GET /profiles/mentors/{id}` |
+| `search()` | `GET /profiles/mentors?...` |
+
+### 15.5. Mentoring API
+
+`src/features/mentoring/api/mentoring-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `create()` | `POST /mentoring/requests` |
+| `getList()` | `GET /mentoring/requests` |
+| `getById()` | `GET /mentoring/requests/{id}` |
+| `markViewed()` | `PUT /mentoring/requests/{id}/view` |
+| `requestClarification()` | `PUT /mentoring/requests/{id}/needs-clarification` |
+| `accept()` | `PUT /mentoring/requests/{id}/accept` |
+| `reject()` | `PUT /mentoring/requests/{id}/reject` |
+| `cancel()` | `PUT /mentoring/requests/{id}/cancel` |
+| `complete()` | `PUT /mentoring/requests/{id}/complete` |
+
+### 15.6. Chat API
+
+`src/features/chat/api/chat-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `getChats()` | `GET /chats` |
+| `getById()` | `GET /chats/{chatId}` |
+| `getByRequestId()` | `GET /chats/by-request/{requestId}` |
+| `getMessages()` | `GET /chats/{chatId}/messages` |
+| `sendMessage()` | `POST /chats/{chatId}/messages` |
+
+### 15.7. Files API
+
+`src/features/files/api/files-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `uploadResume()` | `POST /files/resume` |
+| `uploadPortfolio()` | `POST /files/portfolio` |
+| `uploadAvatar()` | `POST /files/avatar` |
+| `uploadChatAttachment()` | `POST /files/chat-attachment` |
+
+### 15.8. Admin API
+
+`src/features/admin/api/admin-api.ts`
+
+| Method | Endpoint |
+|---|---|
+| `assignRole()` | `PUT /admin/users/{userId}/role` |
+
+Admin API присутствует в кодовой базе, но не подключен к route-level UI.
+
+---
+
+## 16. Page-Level Implementation
+
+### 16.1. `HomePage.vue`
+
+#### Responsibility
+
+- route-level dashboard;
+- personalized state summary;
+- navigation entry points;
+- profile summary fetch after authentication.
+
+#### Technical Notes
+
+- watches `isAuthenticated`;
+- запрашивает `profileSummaryApi.getMySummary()`;
+- собирает summary rows через `computed`;
+- не хранит persistent state вне локального route scope.
+
+### 16.2. `AuthPage.vue`
+
+#### Responsibility
+
+- login;
+- registration;
+- password recovery;
+- redirect after successful authorization.
+
+#### Technical Notes
+
+- три режима в одном route component;
+- mode switch реализован через `Tabs`;
+- field validation mapping приходит из `authStore.fieldErrors`;
+- after-login redirect выполняется через watcher на `isAuthenticated`.
+
+### 16.3. `ProfilePage.vue`
+
+#### Responsibility
+
+- profile load;
+- profile edit;
+- dictionary-backed selects;
+- preview panel.
+
+#### Technical Notes
+
+- зависит одновременно от `authStore`, `dictionariesStore`, `profilesStore`;
+- инициирует `profilesStore.initialize()` через watcher;
+- form inputs напрямую привязаны к reactive state store;
+- preview panel рендерится из сохраненных backend DTO, а не из "грязной" формы.
+
+#### Architectural Observation
+
+Это наиболее нагруженный route component в приложении.
+Здесь сосредоточено значительное количество формы и шаблонной разметки; при дальнейшем росте это основной кандидат на декомпозицию.
+
+### 16.4. `MentorsPage.vue`
+
+#### Responsibility
+
+- mentor search;
+- filter application;
+- mentor selection;
+- request draft submission.
+
+#### Technical Notes
+
+- фильтры заполняются через dictionaries;
+- результаты выдаются как карточки;
+- selection сохраняется в store и отображается в отдельной панели;
+- request form существует в том же route scope, что и search results.
+
+### 16.5. `RequestsPage.vue`
+
+#### Responsibility
+
+- request list browsing;
+- request detail inspection;
+- request state transitions.
+
+#### Technical Notes
+
+- list fetch on auth availability;
+- selected request сохраняется в store;
+- transition buttons вызывают store actions, а не API напрямую;
+- clarification/rejection notes хранятся в store.
+
+### 16.6. `ChatPage.vue`
+
+#### Responsibility
+
+- chat navigation;
+- thread rendering;
+- lookup by request id;
+- message submission.
+
+#### Technical Notes
+
+- `orderedMessages` и `chatItems` вычисляются через `computed`;
+- автоматический scroll-to-bottom выполняется через watcher + `nextTick`;
+- sender/peer labeling опирается на `user.id`;
+- message composer допускает отправку text-only, attachment-only или mixed payload.
+
+### 16.7. `FilesPage.vue`
+
+#### Responsibility
+
+- client-side file selection;
+- upload dispatch;
+- backend metadata inspection after upload.
+
+#### Technical Notes
+
+- hidden file inputs контролируются через refs;
+- карточки конфигурируются data-driven массивом `uploadCards`;
+- upload result метаданные сохраняются и отображаются без повторного fetch.
+
+---
+
+## 17. Cross-Feature Flows
+
+### 17.1. App Initialization Flow
+
+```text
+main.ts
+ -> App.vue mounted
+ -> authStore.initialize()
+ -> dictionariesStore.loadAll()
+```
+
+### 17.2. Session Restoration Flow
+
+```text
+authStore.initialize()
+ -> tokenStorage.get()
+ -> authApi.getCurrentUser()
+ -> user hydration
+ -> authenticated UI state
+```
+
+### 17.3. Login Flow
+
+```text
+AuthPage submit
+ -> authStore.login()
+ -> authApi.login()
+ -> request("/auth/login")
+ -> accessToken + user
+ -> tokenStorage.set()
+ -> store update
+ -> route transition
+```
+
+### 17.4. Profile Save Flow
+
+```text
+ProfilePage
+ -> profilesStore.saveStudentProfile() / saveMentorProfile()
+ -> build DTO payload
+ -> feature API call
+ -> backend response
+ -> form patch from persisted DTO
+```
+
+### 17.5. Mentor Request Creation Flow
+
+```text
+MentorsPage
+ -> mentorDirectoryStore.searchMentors()
+ -> mentor selection
+ -> mentorDirectoryStore.submitRequest()
+ -> mentoringApi.create()
+```
+
+### 17.6. Request Transition Flow
+
+```text
+RequestsPage
+ -> requestsStore.openRequest()
+ -> requestsStore.accept/clarify/reject/cancel/complete()
+ -> runRequestAction()
+ -> refresh active request + refresh list
+```
+
+### 17.7. Attachment-Backed Message Flow
+
+```text
+FilesPage
+ -> filesStore.upload("chat-attachment")
+ -> backend returns fileId
+
+ChatPage
+ -> form.attachmentFileId = fileId
+ -> chatStore.sendMessage()
+ -> POST /chats/{chatId}/messages
+```
+
+---
+
+## 18. UI and Styling
+
+### 18.1. Styling Strategy
+
+Стилизация комбинирует:
+
+- UI kit components из `conductor`;
+- глобальный custom SCSS в `src/style.scss`;
+- дополнительные CSS-стили из `src/styles/conductor-lite.css`.
+
+### 18.2. `style.scss`
+
+Файл определяет:
+
+- CSS custom properties;
+- shell colors and spacing;
+- dark/light visual modes;
+- card/grid/layout primitives;
+- page-level structural classes;
+- chat/file/profile panel styling.
+
+### 18.3. Styling Characteristics
+
+- Значительная доля layout/styling логики централизована.
+- CSS-модель ближе к application-shell стилю, чем к atomic CSS.
+- Компонентная изоляция стилей ограниченная; значительная часть селекторов глобальна.
+
+---
+
+## 19. Testing
+
+### 19.1. Framework
+
+`frontend/playwright.config.ts`
+
+Playwright конфигурирован для:
+
+- `tests/e2e`
+- Chromium/Chrome project
+- локального web server через `npm run dev -- --host 127.0.0.1 --port 4173`
+- screenshot/video/trace capture
+
+### 19.2. Test Strategy
+
+`tests/e2e/app.spec.ts`
+
+Покрываемые группы сценариев:
+
+- guest home/auth rendering;
+- authenticated mentor directory + requests workflow;
+- authenticated chat + file upload workflow.
+
+### 19.3. Backend Isolation
+
+`tests/e2e/support/mock-api.ts`
+
+Frontend-тесты не требуют реального backend.
+Playwright route interception эмулирует:
+
+- auth responses;
+- dictionaries;
+- profiles;
+- mentor cards;
+- requests;
+- chat state;
+- file uploads.
+
+### 19.4. Consequence
+
+Текущий e2e-контур является UI-contract level test suite, а не full-stack integration suite.
+Это обеспечивает:
+
+- воспроизводимость;
+- независимость от внешней инфраструктуры;
+- стабильные визуальные снапшоты.
+
+---
+
+## 20. Architectural Characteristics
+
+### 20.1. Strong Aspects
+
+- Централизованный transport layer.
+- Единый typed contract layer.
+- Четкое разделение endpoint wrappers и state orchestration.
+- Store-слой не смешан с raw `fetch`.
+- Route components получают данные через store/API abstraction, а не через transport напрямую.
+- Основные backend flows покрыты UI и e2e-сценариями.
+
+### 20.2. Current Trade-Offs
+
+- Route access control реализован в components, а не router guards.
+- Refresh token flow отсутствует.
+- `ProfilePage.vue` и некоторые другие route components уже достаточно крупные.
+- Глобальный `style.scss` концентрирует значительный объем визуальной логики.
+- Admin transport layer реализован, но route-level admin UI отсутствует.
+
+### 20.3. Refactoring Priorities
+
+При дальнейшем развитии кода первоочередными кандидатами являются:
+
+1. Декомпозиция крупных route components на feature/view subcomponents.
+2. Введение router guards для protected sections.
+3. Выделение composables для route-level orchestration logic.
+4. Локализация styles ближе к feature/page boundaries.
+5. Добавление auth refresh strategy при необходимости production-hardening.
+
+---
+
+## 21. File Map for Review
+
+Ниже минимальный технический маршрут по коду, если требуется пошаговый разбор реализации:
+
+- `src/main.ts`
+- `src/App.vue`
+- `src/app/router/index.ts`
+- `src/app/layouts/MainLayout.vue`
+- `src/shared/config/env.ts`
+- `src/shared/api/http.ts`
+- `src/shared/api/query.ts`
+- `src/shared/api/contracts.ts`
+- `src/shared/lib/token-storage.ts`
+- `src/shared/lib/api-errors.ts`
+- `src/shared/lib/options.ts`
+- `src/shared/lib/presenters.ts`
+- `src/features/auth/api/auth-api.ts`
+- `src/features/auth/model/auth-store.ts`
+- `src/features/dictionaries/model/dictionaries-store.ts`
+- `src/features/profile/model/profiles-store.ts`
+- `src/features/mentor-profile/model/mentor-directory-store.ts`
+- `src/features/mentoring/model/requests-store.ts`
+- `src/features/chat/model/chat-store.ts`
+- `src/features/files/model/files-store.ts`
+- `src/pages/HomePage.vue`
+- `src/pages/AuthPage.vue`
+- `src/pages/ProfilePage.vue`
+- `src/pages/MentorsPage.vue`
+- `src/pages/RequestsPage.vue`
+- `src/pages/ChatPage.vue`
+- `src/pages/FilesPage.vue`
+- `tests/e2e/app.spec.ts`
+- `tests/e2e/support/mock-api.ts`
+
+---
+
+## 22. Summary
+
+Текущее состояние `frontend/` можно охарактеризовать как typed SPA-клиент с явным разделением на:
+
+- bootstrap/runtime;
+- transport/contracts;
+- feature state;
+- route presentation.
+
+Основной инженерный акцент сделан на предсказуемой интеграции с backend API, а не на усложненной клиентской инфраструктуре.
