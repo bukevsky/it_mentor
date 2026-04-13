@@ -94,7 +94,7 @@ class ChatServiceTest {
         @Test
         @DisplayName("happyPath — корректно сохраняет чат с правильными userId")
         void createForRequest_happyPath_shouldSaveChat() {
-            when(chatRepository.findByMentoringRequestId(100L)).thenReturn(Optional.empty());
+            when(chatRepository.existsByMentoringRequestId(100L)).thenReturn(false);
 
             service.createForRequest(mentoringRequest);
 
@@ -109,7 +109,7 @@ class ChatServiceTest {
         @Test
         @DisplayName("duplicate — бросает ConflictException если чат уже есть")
         void createForRequest_duplicate_shouldThrowConflict() {
-            when(chatRepository.findByMentoringRequestId(100L)).thenReturn(Optional.of(chat));
+            when(chatRepository.existsByMentoringRequestId(100L)).thenReturn(true);
 
             assertThatThrownBy(() -> service.createForRequest(mentoringRequest))
                     .isInstanceOf(ConflictException.class);
@@ -126,7 +126,7 @@ class ChatServiceTest {
         @DisplayName("participant — студент получает свой чат")
         void getById_participant_shouldReturnResponse() {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
-            when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
+            when(chatRepository.findWithMentoringRequestById(200L)).thenReturn(Optional.of(chat));
             ChatResponse expected = new ChatResponse(200L, 100L, 1L, 2L, null);
             when(mapper.toResponse(chat)).thenReturn(expected);
 
@@ -141,7 +141,7 @@ class ChatServiceTest {
             User outsider = User.builder().email("other@test.com").build();
             ReflectionTestUtils.setField(outsider, "id", 99L);
             when(userService.getCurrentUserEntity()).thenReturn(outsider);
-            when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
+            when(chatRepository.findWithMentoringRequestById(200L)).thenReturn(Optional.of(chat));
 
             assertThatThrownBy(() -> service.getById(200L))
                     .isInstanceOf(ForbiddenException.class);
@@ -151,7 +151,7 @@ class ChatServiceTest {
         @DisplayName("notFound — несуществующий chatId → NotFoundException")
         void getById_notFound_shouldThrowNotFound() {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
-            when(chatRepository.findById(999L)).thenReturn(Optional.empty());
+            when(chatRepository.findWithMentoringRequestById(999L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.getById(999L))
                     .isInstanceOf(NotFoundException.class);

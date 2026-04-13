@@ -24,6 +24,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Сервис управления чатами и сообщениями по заявкам на менторство.
+ */
 @Slf4j
 @Service
 @Transactional(readOnly = true)
@@ -37,9 +40,14 @@ public class ChatService {
     private final StoredFileRepository storedFileRepository;
     private final ChatMapper mapper;
 
+    /**
+     * Создаёт чат для принятой заявки на менторство.
+     *
+     * @param request заявка, для которой создаётся чат
+     */
     @Transactional
     public void createForRequest(MentoringRequest request) {
-        if (chatRepository.findByMentoringRequestId(request.getId()).isPresent()) {
+        if (chatRepository.existsByMentoringRequestId(request.getId())) {
             throw new ConflictException("Чат для этой заявки уже существует");
         }
         Long studentUserId = request.getStudentProfile().getUser().getId();
@@ -53,14 +61,26 @@ public class ChatService {
         log.info("Чат создан: chatId={}, requestId={}, studentUserId={}, mentorUserId={}", chat.getId(), request.getId(), studentUserId, mentorUserId);
     }
 
+    /**
+     * Возвращает чат по идентификатору после проверки участия текущего пользователя.
+     *
+     * @param chatId идентификатор чата
+     * @return данные чата
+     */
     public ChatResponse getById(Long chatId) {
         User currentUser = userService.getCurrentUserEntity();
-        Chat chat = chatRepository.findById(chatId)
+        Chat chat = chatRepository.findWithMentoringRequestById(chatId)
                 .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
         checkParticipant(chat, currentUser.getId());
         return mapper.toResponse(chat);
     }
 
+    /**
+     * Возвращает чат по идентификатору заявки на менторство.
+     *
+     * @param requestId идентификатор заявки
+     * @return данные чата
+     */
     public ChatResponse getByRequestId(Long requestId) {
         User currentUser = userService.getCurrentUserEntity();
         Chat chat = chatRepository.findByMentoringRequestId(requestId)
@@ -69,12 +89,25 @@ public class ChatService {
         return mapper.toResponse(chat);
     }
 
+    /**
+     * Возвращает страницу чатов текущего пользователя.
+     *
+     * @param pageable параметры пагинации
+     * @return страница чатов
+     */
     public PagedResponse<ChatResponse> getMyChats(Pageable pageable) {
         User currentUser = userService.getCurrentUserEntity();
         Page<Chat> page = chatRepository.findAllByUserId(currentUser.getId(), pageable);
         return PagedResponse.from(page.map(mapper::toResponse));
     }
 
+    /**
+     * Возвращает страницу сообщений указанного чата.
+     *
+     * @param chatId идентификатор чата
+     * @param pageable параметры пагинации
+     * @return страница сообщений
+     */
     public PagedResponse<ChatMessageResponse> getMessages(Long chatId, Pageable pageable) {
         User currentUser = userService.getCurrentUserEntity();
         Chat chat = chatRepository.findById(chatId)
@@ -84,6 +117,13 @@ public class ChatService {
         return PagedResponse.from(page.map(mapper::toMessageResponse));
     }
 
+    /**
+     * Сохраняет новое сообщение в чате.
+     *
+     * @param chatId идентификатор чата
+     * @param dto данные сообщения
+     * @return сохранённое сообщение
+     */
     @Transactional
     public ChatMessageResponse sendMessage(Long chatId, SendMessageRequest dto) {
         User currentUser = userService.getCurrentUserEntity();
@@ -116,6 +156,12 @@ public class ChatService {
         return mapper.toMessageResponse(message);
     }
 
+    /**
+     * Проверяет, что указанный пользователь участвует в чате.
+     *
+     * @param chat чат для проверки
+     * @param userId идентификатор пользователя
+     */
     private void checkParticipant(Chat chat, Long userId) {
         if (!userId.equals(chat.getStudentUserId()) && !userId.equals(chat.getMentorUserId())) {
             throw new ForbiddenException("Доступ к чату запрещён");

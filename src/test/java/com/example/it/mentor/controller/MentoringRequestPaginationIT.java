@@ -1,5 +1,6 @@
 package com.example.it.mentor.controller;
 
+import com.example.it.mentor.dto.ErrorResponse;
 import com.example.it.mentor.dto.LoginRequest;
 import com.example.it.mentor.dto.LoginResponse;
 import com.example.it.mentor.dto.PagedResponse;
@@ -227,17 +228,17 @@ class MentoringRequestPaginationIT {
         }
 
         @Test
-        @DisplayName("несуществующий статус → 4xx/5xx (тип ошибки конвертации enum)")
+        @DisplayName("несуществующий статус → 400 VALIDATION_ERROR")
         void invalidStatus_shouldReturnError() {
-            // GlobalExceptionHandler не обрабатывает MethodArgumentTypeMismatchException,
-            // поэтому текущее поведение — 500. Тест проверяет что это не 200.
-            ResponseEntity<Object> response = restTemplate.exchange(
+            ResponseEntity<ErrorResponse> response = restTemplate.exchange(
                     "/mentoring/requests?status=INVALID_STATUS", HttpMethod.GET,
-                    bearerRequest(null, mentorToken), Object.class);
+                    bearerRequest(null, mentorToken), ErrorResponse.class);
 
-            assertThat(response.getStatusCode().is4xxClientError()
-                    || response.getStatusCode().is5xxServerError())
-                    .as("Невалидный статус должен вернуть ошибку").isTrue();
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().error()).isEqualTo("VALIDATION_ERROR");
+            assertThat(response.getBody().details())
+                    .anySatisfy(detail -> assertThat(detail).contains("status").contains("INVALID_STATUS"));
         }
     }
 
@@ -334,7 +335,7 @@ class MentoringRequestPaginationIT {
     }
 
     private void grantMentorRole(String email) {
-        User user = userRepository.findByEmailAndDeletedFalse(email).orElseThrow();
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
         Role mentorRole = roleRepository.findByCode(RoleCode.MENTOR).orElseThrow();
         user.getRoles().clear();
         user.getRoles().add(mentorRole);

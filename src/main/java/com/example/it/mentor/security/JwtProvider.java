@@ -31,6 +31,9 @@ public class JwtProvider {
 
     private SecretKey key;
 
+    /**
+     * Инициализирует криптографический ключ из конфигурационного секрета.
+     */
     @PostConstruct
     private void initKey() {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));

@@ -185,6 +185,22 @@ class StudentProfileControllerIT {
         }
 
         @Test
+        @DisplayName("слишком длинный phone → 400")
+        void tooLongPhone_shouldReturn400() {
+            String token = registerAndLogin();
+            StudentProfileRequest request = new StudentProfileRequest(
+                    "Иван", "Иванов", null, "1".repeat(31), null,
+                    null, null, null, null, null,
+                    null, null, null, null, null);
+
+            ResponseEntity<Object> response = restTemplate.exchange(
+                    "/profile/student", HttpMethod.PUT,
+                    bearerRequest(request, token), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
         @DisplayName("несуществующий cityId → 404")
         void nonExistentCityId_shouldReturn404() {
             String token = registerAndLogin();

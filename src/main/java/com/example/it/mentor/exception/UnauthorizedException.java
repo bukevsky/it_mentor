@@ -10,6 +10,9 @@ import org.springframework.http.HttpStatus;
  */
 public class UnauthorizedException extends ApiException {
 
+    /**
+     * @param message описание ошибки аутентификации
+     */
     public UnauthorizedException(String message) {
         super(message, HttpStatus.UNAUTHORIZED);
     }

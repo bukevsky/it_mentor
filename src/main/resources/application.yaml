@@ -4,7 +4,7 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:itmentor}
     username: ${DB_USER:itmentor}
-    password: ${DB_PASSWORD:itmentor}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -16,6 +16,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    open-in-view: false
     show-sql: false
     properties:
       jakarta:
@@ -47,16 +48,18 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:CHANGE-ME-set-JWT_SECRET-env-var-in-production-32chars}
+    secret: ${JWT_SECRET}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   otp:
     expiration-minutes: 15
     max-attempts: 5
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-    access-key: ${MINIO_ACCESS_KEY:minioadmin}
-    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
     bucket-name: ${MINIO_BUCKET:itmentor}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
 
 management:
   endpoints:
@@ -65,14 +68,15 @@ management:
         include: health,prometheus,info
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
   metrics:
     tags:
       application: ${spring.application.name}
 
 logging:
-  pattern:
-    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(%logger{36}){cyan} - %msg%n"
+  structured:
+    format:
+      console: logstash
   level:
     com.example.it.mentor: INFO
     org.springframework.security: WARN

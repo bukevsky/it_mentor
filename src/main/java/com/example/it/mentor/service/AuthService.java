@@ -22,6 +22,9 @@ import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.Set;
 
+/**
+ * Сервис аутентификации, регистрации и восстановления пароля.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -39,6 +42,15 @@ public class AuthService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
+    /**
+     * Регистрирует нового пользователя с базовой ролью студента.
+     *
+     * <p>Метод нормализует email, проверяет уникальность, создаёт пользователя и
+     * стартовый профиль студента с именем и фамилией из запроса.</p>
+     *
+     * @param request запрос регистрации
+     * @return данные зарегистрированного пользователя
+     */
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
         String email = request.email().toLowerCase();
@@ -75,6 +87,12 @@ public class AuthService {
         return authMapper.toRegisterResponse(saved);
     }
 
+    /**
+     * Выполняет аутентификацию пользователя по email и паролю.
+     *
+     * @param request запрос входа
+     * @return JWT-токен и данные пользователя
+     */
     @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request) {
         String email = request.email().toLowerCase();
@@ -100,6 +118,14 @@ public class AuthService {
         return new LoginResponse(token, "Bearer", authMapper.toUserInfoResponse(user));
     }
 
+    /**
+     * Инициирует сброс пароля для указанного email.
+     *
+     * <p>Независимо от существования пользователя наружу возвращается успешный ответ,
+     * чтобы не раскрывать факт регистрации адреса в системе.</p>
+     *
+     * @param request email для восстановления доступа
+     */
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
         String email = request.email().toLowerCase();
@@ -121,10 +147,20 @@ public class AuthService {
         });
     }
 
+    /**
+     * Генерирует шестизначный OTP-код.
+     *
+     * @return строковое представление OTP с ведущими нулями
+     */
     private static String generateOtp() {
         return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
     }
 
+    /**
+     * Сбрасывает пароль по email и одноразовому коду.
+     *
+     * @param request email, OTP-код и новый пароль
+     */
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         String email = request.email().toLowerCase();

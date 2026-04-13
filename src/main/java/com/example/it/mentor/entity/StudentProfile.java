@@ -67,8 +67,8 @@ public class StudentProfile extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String about;
 
-    @Column(length = 100)
-    private String max;
+    @Column(name = "max", length = 100)
+    private String maxContact;
 
     @ElementCollection
     @CollectionTable(name = "student_employment_types", joinColumns = @JoinColumn(name = "profile_id"))

@@ -14,7 +14,7 @@ public record MentorProfileResponse(
         String department,
         CityResponse city,
         String phone,
-        String max,
+        String maxContact,
         String description,
         String expectations,
         String canHelpWith,

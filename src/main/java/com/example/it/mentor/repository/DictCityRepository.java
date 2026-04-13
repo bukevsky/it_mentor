@@ -5,7 +5,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
+/**
+ * Репозиторий справочника городов.
+ */
 public interface DictCityRepository extends JpaRepository<DictCity, Long> {
 
+    /**
+     * Возвращает активные города, отсортированные по имени.
+     *
+     * @return список активных городов
+     */
     List<DictCity> findByActiveTrueOrderByNameAsc();
 }

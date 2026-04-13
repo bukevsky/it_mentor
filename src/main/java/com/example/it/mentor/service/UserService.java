@@ -13,6 +13,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Сервис работы с пользователями и текущим контекстом аутентификации.
+ */
 @Service
 @RequiredArgsConstructor
 public class UserService {
@@ -22,22 +25,46 @@ public class UserService {
     private final FileStorage fileStorage;
     private final UserDetailsServiceImpl userDetailsService;
 
+    /**
+     * Ищет пользователя по email вместе с ролями.
+     *
+     * @param email email пользователя
+     * @return найденный пользователь
+     */
     @Transactional(readOnly = true)
     public User findByEmail(String email) {
-        return userRepository.findByEmailAndDeletedFalse(email)
+        return userRepository.findWithRolesByEmailAndDeletedFalse(email)
                 .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
     }
 
+    /**
+     * Проверяет наличие активного пользователя с указанным email.
+     *
+     * @param email email пользователя
+     * @return {@code true}, если пользователь существует
+     */
     @Transactional(readOnly = true)
     public boolean existsByEmail(String email) {
         return userRepository.existsByEmailAndDeletedFalse(email);
     }
 
+    /**
+     * Ищет пользователя по email без выброса исключения.
+     *
+     * @param email email пользователя
+     * @return optional с найденным пользователем
+     */
     @Transactional(readOnly = true)
     public Optional<User> findByEmailOptional(String email) {
         return userRepository.findByEmailAndDeletedFalse(email);
     }
 
+    /**
+     * Сохраняет пользователя и сбрасывает кэш security-деталей.
+     *
+     * @param user пользователь для сохранения
+     * @return сохранённая сущность
+     */
     @Transactional
     public User save(User user) {
         User saved = userRepository.save(user);
@@ -45,6 +72,12 @@ public class UserService {
         return saved;
     }
 
+    /**
+     * Привязывает аватар к пользователю после проверки владения файлом.
+     *
+     * @param userId идентификатор пользователя
+     * @param fileId идентификатор файла аватара
+     */
     @Transactional
     public void linkAvatar(Long userId, Long fileId) {
         fileStorage.requireOwned(fileId, userId);
@@ -54,6 +87,11 @@ public class UserService {
         save(user);
     }
 
+    /**
+     * Возвращает информацию о текущем аутентифицированном пользователе.
+     *
+     * @return DTO текущего пользователя
+     */
     @Transactional(readOnly = true)
     public UserInfoResponse getCurrentUser() {
         String email = currentEmail();
@@ -69,6 +107,11 @@ public class UserService {
         return findByEmail(currentEmail());
     }
 
+    /**
+     * Извлекает email текущего пользователя из {@link SecurityContextHolder}.
+     *
+     * @return email текущего пользователя
+     */
     private String currentEmail() {
         return SecurityContextHolder.getContext().getAuthentication().getName();
     }

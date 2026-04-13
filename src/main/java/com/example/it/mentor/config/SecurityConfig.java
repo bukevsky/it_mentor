@@ -4,6 +4,7 @@ import com.example.it.mentor.security.Http401EntryPoint;
 import com.example.it.mentor.security.Http403AccessDeniedHandler;
 import com.example.it.mentor.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -22,8 +23,15 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.ShallowEtagHeaderFilter;
 
+import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Основная конфигурация Spring Security для приложения.
+ *
+ * <p>Настраивает stateless JWT-аутентификацию, правила доступа, CORS,
+ * защитные заголовки и инфраструктурные security-бины.</p>
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
@@ -38,14 +46,24 @@ public class SecurityConfig {
             "/swagger-ui/**",
             "/v3/api-docs/**",
             "/actuator/health",
-            "/actuator/prometheus",
-            "/dictionaries/**"
+            "/dictionaries/**",
+            "/profiles/mentors/*/reviews"
     };
+
+    @Value("${app.cors.allowed-origins}")
+    private String corsAllowedOrigins;
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final Http401EntryPoint http401EntryPoint;
     private final Http403AccessDeniedHandler http403AccessDeniedHandler;
 
+    /**
+     * Собирает основную цепочку security-фильтров приложения.
+     *
+     * @param http builder конфигурации безопасности
+     * @return настроенная цепочка фильтров
+     * @throws Exception если конфигурация не может быть собрана
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
@@ -60,14 +78,24 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(http401EntryPoint)
                         .accessDeniedHandler(http403AccessDeniedHandler))
+                .headers(headers -> headers
+                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'"))
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .maxAgeInSeconds(31536000)
+                                .includeSubDomains(true)))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
 
+    /**
+     * Создаёт источник CORS-конфигурации на основе значений из properties.
+     *
+     * @return источник CORS-настроек для всех эндпоинтов
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedOriginPatterns(Arrays.asList(corsAllowedOrigins.split(",")));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
@@ -78,16 +106,33 @@ public class SecurityConfig {
         return source;
     }
 
+    /**
+     * Включает генерацию ETag для GET-ответов.
+     *
+     * @return фильтр ETag
+     */
     @Bean
     public ShallowEtagHeaderFilter shallowEtagHeaderFilter() {
         return new ShallowEtagHeaderFilter();
     }
 
+    /**
+     * Возвращает encoder для хеширования паролей пользователей.
+     *
+     * @return BCrypt encoder
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Делегирует создание {@link AuthenticationManager} конфигурации Spring Security.
+     *
+     * @param config конфигурация аутентификации
+     * @return authentication manager
+     * @throws Exception если менеджер не может быть получен
+     */
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();

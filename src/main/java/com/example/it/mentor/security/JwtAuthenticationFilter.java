@@ -32,14 +32,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String AUTH_HEADER = "Authorization";
+    private static final String USER_ID_MDC_KEY = "userId";
 
     private final JwtProvider jwtProvider;
     private final UserDetailsServiceImpl userDetailsService;
 
+    /**
+     * Пытается аутентифицировать пользователя по JWT из заголовка {@code Authorization}.
+     *
+     * @param request входящий HTTP-запрос
+     * @param response HTTP-ответ
+     * @param filterChain цепочка фильтров
+     * @throws ServletException если следующий фильтр завершился ошибкой сервлета
+     * @throws IOException если произошла ошибка ввода-вывода
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        MDC.remove(USER_ID_MDC_KEY);
         try {
             String token = extractToken(request);
             if (StringUtils.hasText(token) && jwtProvider.validateToken(token)) {
@@ -52,7 +63,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     );
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(auth);
-                    MDC.put("userId", email);
+                    if (userDetails instanceof AppUserDetails appUserDetails) {
+                        MDC.put(USER_ID_MDC_KEY, String.valueOf(appUserDetails.getUserId()));
+                    }
                 }
             }
         } catch (Exception e) {
@@ -62,6 +75,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    /**
+     * Извлекает Bearer-токен из заголовка {@code Authorization}.
+     *
+     * @param request входящий HTTP-запрос
+     * @return токен без префикса или {@code null}, если заголовок отсутствует
+     */
     private String extractToken(HttpServletRequest request) {
         String header = request.getHeader(AUTH_HEADER);
         if (StringUtils.hasText(header) && header.startsWith(BEARER_PREFIX)) {

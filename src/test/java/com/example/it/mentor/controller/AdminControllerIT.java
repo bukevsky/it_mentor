@@ -61,7 +61,7 @@ class AdminControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        User updated = userRepository.findById(targetUserId).orElseThrow();
+        User updated = userRepository.findWithRolesById(targetUserId).orElseThrow();
         assertThat(updated.getRoles()).anyMatch(r -> r.getCode() == RoleCode.MENTOR);
         assertThat(updated.getRoles()).noneMatch(r -> r.getCode() == RoleCode.STUDENT);
     }
@@ -81,7 +81,7 @@ class AdminControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        User updated = userRepository.findById(targetUserId).orElseThrow();
+        User updated = userRepository.findWithRolesById(targetUserId).orElseThrow();
         assertThat(updated.getRoles()).anyMatch(r -> r.getCode() == RoleCode.STUDENT);
         assertThat(updated.getRoles()).noneMatch(r -> r.getCode() == RoleCode.MENTOR);
     }
@@ -143,7 +143,7 @@ class AdminControllerIT {
     }
 
     private void grantAdminRole(String email) {
-        User user = userRepository.findByEmailAndDeletedFalse(email).orElseThrow();
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
         Role adminRole = roleRepository.findByCode(RoleCode.ADMIN).orElseThrow();
         user.getRoles().clear();
         user.getRoles().add(adminRole);

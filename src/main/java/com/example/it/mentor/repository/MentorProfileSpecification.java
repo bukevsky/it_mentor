@@ -11,10 +11,22 @@ import org.springframework.data.jpa.domain.Specification;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Утилита построения {@link Specification} для поиска профилей менторов.
+ */
 public final class MentorProfileSpecification {
 
+    /**
+     * Закрытый конструктор utility-класса.
+     */
     private MentorProfileSpecification() {}
 
+    /**
+     * Строит спецификацию по набору параметров поиска менторов.
+     *
+     * @param filter фильтр поиска
+     * @return спецификация для JPA Criteria API
+     */
     public static Specification<MentorProfile> build(MentorSearchFilter filter) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -62,6 +74,9 @@ public final class MentorProfileSpecification {
 
     /**
      * Экранирует спецсимволы LIKE (%,_,\) в пользовательском вводе.
+     *
+     * @param input пользовательская строка
+     * @return безопасная строка для LIKE-условия
      */
     private static String escapeLike(String input) {
         return input

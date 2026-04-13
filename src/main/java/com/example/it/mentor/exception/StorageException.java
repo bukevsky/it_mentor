@@ -10,6 +10,10 @@ import org.springframework.http.HttpStatus;
  */
 public class StorageException extends ApiException {
 
+    /**
+     * @param message описание ошибки хранилища
+     * @param cause исходная причина
+     */
     public StorageException(String message, Throwable cause) {
         super(message, HttpStatus.INTERNAL_SERVER_ERROR, cause);
     }

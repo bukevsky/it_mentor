@@ -49,8 +49,8 @@ public class MentorProfile extends BaseEntity {
     @Column(length = 30)
     private String phone;
 
-    @Column(length = 100)
-    private String max;
+    @Column(name = "max", length = 100)
+    private String maxContact;
 
     @Column(columnDefinition = "TEXT")
     private String description;

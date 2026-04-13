@@ -5,7 +5,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
+/**
+ * Репозиторий справочника языков.
+ */
 public interface DictLanguageRepository extends JpaRepository<DictLanguage, Long> {
 
+    /**
+     * Возвращает активные языки, отсортированные по имени.
+     *
+     * @return список активных языков
+     */
     List<DictLanguage> findByActiveTrueOrderByNameAsc();
 }

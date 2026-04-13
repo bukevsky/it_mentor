@@ -14,6 +14,7 @@ import jakarta.validation.ConstraintViolationException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 
@@ -42,9 +43,7 @@ public class GlobalExceptionHandler {
                 .toList();
         log.debug("Ошибка валидации [{} {}]: {}", request.getMethod(), request.getRequestURI(), details);
 
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(ErrorResponse.of(400, "VALIDATION_ERROR", "Ошибка валидации", request.getRequestURI(), details));
+        return badRequest("Ошибка валидации", request, details);
     }
 
     /**
@@ -58,9 +57,7 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getConstraintViolations().stream()
                 .map(v -> v.getPropertyPath() + ": " + v.getMessage())
                 .toList();
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(ErrorResponse.of(400, "VALIDATION_ERROR", "Ошибка валидации параметров запроса", request.getRequestURI(), details));
+        return badRequest("Ошибка валидации параметров запроса", request, details);
     }
 
     /**
@@ -74,9 +71,19 @@ public class GlobalExceptionHandler {
         List<String> details = ex.getAllErrors().stream()
                 .map(e -> e.getDefaultMessage())
                 .toList();
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(ErrorResponse.of(400, "VALIDATION_ERROR", "Ошибка валидации параметров", request.getRequestURI(), details));
+        return badRequest("Ошибка валидации параметров", request, details);
+    }
+
+    /**
+     * Обрабатывает ошибки несоответствия типа параметра запроса.
+     *
+     * @return HTTP 400 с описанием некорректного значения
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex,
+                                                            HttpServletRequest request) {
+        String detail = ex.getName() + ": некорректное значение '" + ex.getValue() + "'";
+        return badRequest("Ошибка валидации параметров", request, List.of(detail));
     }
 
     /**
@@ -162,5 +169,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.of(500, "INTERNAL_SERVER_ERROR", "Внутренняя ошибка сервера", request.getRequestURI()));
+    }
+
+    /**
+     * Формирует унифицированный ответ для ошибок валидации клиента.
+     *
+     * @param message пользовательское сообщение об ошибке
+     * @param request исходный HTTP-запрос
+     * @param details список деталей ошибки
+     * @return ответ со статусом {@code 400 BAD REQUEST}
+     */
+    private ResponseEntity<ErrorResponse> badRequest(String message,
+                                                     HttpServletRequest request,
+                                                     List<String> details) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "VALIDATION_ERROR", message, request.getRequestURI(), details));
     }
 }

@@ -1,7 +1,6 @@
 package com.example.it.mentor.entity.enums;
 
 import com.example.it.mentor.exception.BusinessRuleViolationException;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Set;
 
@@ -17,10 +16,18 @@ public enum FileType {
             "Портфолио должно быть PDF, JPEG или PNG",
             "Размер файла не должен превышать 10 МБ"),
     ATTACHMENT("Вложение",
-            Set.of(),
-            Long.MAX_VALUE,
-            null,
-            null),
+            Set.of(
+                    "image/jpeg", "image/png", "image/gif", "image/webp",
+                    "application/pdf", "text/plain",
+                    "application/zip",
+                    "application/msword",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/vnd.ms-excel",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            20L * 1024 * 1024,
+            "Недопустимый тип файла для вложения",
+            "Размер вложения не должен превышать 20 МБ"),
     AVATAR("Аватар",
             Set.of("image/jpeg", "image/png", "image/webp"),
             2L * 1024 * 1024,
@@ -54,12 +61,12 @@ public enum FileType {
         return maxSizeBytes;
     }
 
-    public void validate(MultipartFile file) {
+    public void validate(String contentType, long size) {
         if (!allowedContentTypes.isEmpty()
-                && !allowedContentTypes.contains(file.getContentType())) {
+                && !allowedContentTypes.contains(contentType)) {
             throw new BusinessRuleViolationException(contentTypeError);
         }
-        if (file.getSize() > maxSizeBytes) {
+        if (size > maxSizeBytes) {
             throw new BusinessRuleViolationException(sizeError);
         }
     }

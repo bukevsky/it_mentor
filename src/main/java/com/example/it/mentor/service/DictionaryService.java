@@ -16,6 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
+/**
+ * Сервис чтения справочных данных.
+ *
+ * <p>Возвращает только активные записи и кэширует результат для повторных запросов.</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -27,21 +32,41 @@ public class DictionaryService {
     private final DictInteractionTypeRepository interactionTypeRepository;
     private final DictionaryMapper dictionaryMapper;
 
+    /**
+     * Возвращает список активных городов.
+     *
+     * @return города, отсортированные по имени
+     */
     @Cacheable(value = "dictionaries", key = "'cities'")
     public List<CityResponse> getCities() {
         return dictionaryMapper.toCityResponses(cityRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    /**
+     * Возвращает список активных навыков.
+     *
+     * @return навыки, отсортированные по имени
+     */
     @Cacheable(value = "dictionaries", key = "'skills'")
     public List<SkillResponse> getSkills() {
         return dictionaryMapper.toSkillResponses(skillRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    /**
+     * Возвращает список активных языков.
+     *
+     * @return языки, отсортированные по имени
+     */
     @Cacheable(value = "dictionaries", key = "'languages'")
     public List<LanguageResponse> getLanguages() {
         return dictionaryMapper.toLanguageResponses(languageRepository.findByActiveTrueOrderByNameAsc());
     }
 
+    /**
+     * Возвращает список активных форматов взаимодействия.
+     *
+     * @return типы взаимодействия, отсортированные по имени
+     */
     @Cacheable(value = "dictionaries", key = "'interactionTypes'")
     public List<InteractionTypeResponse> getInteractionTypes() {
         return dictionaryMapper.toInteractionTypeResponses(interactionTypeRepository.findByActiveTrueOrderByNameAsc());

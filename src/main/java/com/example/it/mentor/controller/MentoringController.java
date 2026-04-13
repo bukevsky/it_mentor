@@ -18,6 +18,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * REST-контроллер для управления заявками на менторство.
+ *
+ * <p>Контроллер покрывает полный жизненный цикл заявки: создание, просмотр,
+ * принятие в работу, запрос уточнений, принятие, отклонение, отмену и завершение.</p>
+ */
 @Validated
 @RestController
 @RequestMapping("/mentoring/requests")
@@ -27,12 +33,26 @@ public class MentoringController {
 
     private final MentoringRequestService mentoringRequestService;
 
+    /**
+     * Создаёт новую заявку на менторство.
+     *
+     * @param request данные новой заявки
+     * @return созданная заявка
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public MentoringRequestResponse createRequest(@Valid @RequestBody MentoringRequestCreateRequest request) {
         return mentoringRequestService.createRequest(request);
     }
 
+    /**
+     * Возвращает страницу заявок текущего пользователя.
+     *
+     * @param status необязательный фильтр по статусу
+     * @param page номер страницы, начиная с {@code 0}
+     * @param size размер страницы
+     * @return страница заявок
+     */
     @GetMapping
     public PagedResponse<MentoringRequestResponse> getRequests(
             @RequestParam(required = false) MentoringRequestStatus status,
@@ -41,16 +61,35 @@ public class MentoringController {
         return mentoringRequestService.getRequests(status, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
     }
 
+    /**
+     * Возвращает заявку по идентификатору.
+     *
+     * @param id идентификатор заявки
+     * @return найденная заявка
+     */
     @GetMapping("/{id}")
     public MentoringRequestResponse getById(@PathVariable Long id) {
         return mentoringRequestService.getById(id);
     }
 
+    /**
+     * Переводит заявку в статус просмотра адресатом.
+     *
+     * @param id идентификатор заявки
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/view")
     public MentoringRequestResponse markAsReviewing(@PathVariable Long id) {
         return mentoringRequestService.markAsReviewing(id);
     }
 
+    /**
+     * Запрашивает у инициатора дополнительные сведения по заявке.
+     *
+     * @param id идентификатор заявки
+     * @param request данные с пояснением для уточнения
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/needs-clarification")
     public MentoringRequestResponse requestClarification(
             @PathVariable Long id,
@@ -58,11 +97,24 @@ public class MentoringController {
         return mentoringRequestService.requestClarification(id, request);
     }
 
+    /**
+     * Принимает заявку на менторство.
+     *
+     * @param id идентификатор заявки
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/accept")
     public MentoringRequestResponse acceptRequest(@PathVariable Long id) {
         return mentoringRequestService.acceptRequest(id);
     }
 
+    /**
+     * Отклоняет заявку на менторство.
+     *
+     * @param id идентификатор заявки
+     * @param request причина отклонения
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/reject")
     public MentoringRequestResponse rejectRequest(
             @PathVariable Long id,
@@ -70,11 +122,23 @@ public class MentoringController {
         return mentoringRequestService.rejectRequest(id, request);
     }
 
+    /**
+     * Отменяет заявку её инициатором до финальной обработки.
+     *
+     * @param id идентификатор заявки
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/cancel")
     public MentoringRequestResponse cancelRequest(@PathVariable Long id) {
         return mentoringRequestService.cancelRequest(id);
     }
 
+    /**
+     * Завершает принятую заявку после окончания взаимодействия.
+     *
+     * @param id идентификатор заявки
+     * @return обновлённая заявка
+     */
     @PutMapping("/{id}/complete")
     public MentoringRequestResponse completeRequest(@PathVariable Long id) {
         return mentoringRequestService.completeRequest(id);
