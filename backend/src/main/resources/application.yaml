@@ -71,6 +71,8 @@ management:
       application: ${spring.application.name}
 
 logging:
+  pattern:
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(%logger{36}){cyan} - %msg%n"
   level:
     com.example.it.mentor: INFO
     org.springframework.security: WARN

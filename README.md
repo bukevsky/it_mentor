@@ -29,5 +29,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 
 ## Документация
 
+- Project context for future work: `docs/PROJECT_CONTEXT.md`
+- Backend TODO for frontend gaps: `README-BACKEND.md`
 - Backend: `backend/README.md`
 - Frontend API guide: `frontend/README.md`

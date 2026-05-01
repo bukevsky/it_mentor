@@ -20,6 +20,7 @@ import com.example.it.mentor.repository.StudentLanguageRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.repository.StudentSkillRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StudentProfileService {
@@ -58,6 +60,8 @@ public class StudentProfileService {
 
         StudentProfile profile = profileRepository.findByUserId(user.getId())
                 .orElseGet(() -> StudentProfile.builder().user(user).build());
+
+        boolean isNew = profile.getId() == null;
 
         profile.setFirstName(request.firstName());
         profile.setLastName(request.lastName());
@@ -95,6 +99,7 @@ public class StudentProfileService {
         replaceSkills(profile, request);
 
         StudentProfile saved = profileRepository.save(profile);
+        log.info("{} профиль студента: userId={}, profileId={}", isNew ? "Создан" : "Обновлён", user.getId(), saved.getId());
 
         return mapper.toResponse(profileRepository.findWithDetailsById(saved.getId())
                 .orElseThrow(() -> new NotFoundException("Профиль студента не найден: id=" + saved.getId())));
@@ -114,6 +119,7 @@ public class StudentProfileService {
                 .orElseThrow(() -> new NotFoundException("Профиль студента не найден для пользователя: " + userId));
         profile.setResumeFileId(fileId);
         profileRepository.save(profile);
+        log.info("Резюме привязано к профилю студента: userId={}, fileId={}", userId, fileId);
     }
 
     @Transactional(readOnly = true)

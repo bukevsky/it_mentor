@@ -15,6 +15,16 @@ import { studentProfileApi } from "@/features/student-profile/api/student-profil
 
 type ProfileMode = "student" | "mentor";
 
+export interface StudentFormSkill {
+  skillId: string;
+  level: string;
+}
+
+export interface StudentFormLanguage {
+  languageId: string;
+  level: string;
+}
+
 export const useProfilesStore = defineStore("profiles", () => {
   const authStore = useAuthStore();
 
@@ -24,6 +34,7 @@ export const useProfilesStore = defineStore("profiles", () => {
   const isBusy = ref(false);
   const studentProfile = ref<StudentProfileResponse | null>(null);
   const mentorProfile = ref<MentorProfileResponse | null>(null);
+  const studentSavedState = ref("");
 
   const studentForm = reactive({
     firstName: "",
@@ -38,10 +49,8 @@ export const useProfilesStore = defineStore("profiles", () => {
     max: "",
     employmentTypes: ["PRACTICE"] as string[],
     workFormats: ["REMOTE"] as string[],
-    skillId: "",
-    skillLevel: "INTERMEDIATE",
-    languageId: "",
-    languageLevel: "B2"
+    skills: [] as StudentFormSkill[],
+    languages: [] as StudentFormLanguage[]
   });
 
   const mentorForm = reactive({
@@ -67,6 +76,24 @@ export const useProfilesStore = defineStore("profiles", () => {
   });
 
   const canUseProfiles = computed(() => authStore.isAuthenticated);
+  const studentFormState = computed(() =>
+    JSON.stringify({
+      firstName: studentForm.firstName,
+      lastName: studentForm.lastName,
+      phone: studentForm.phone,
+      cityId: studentForm.cityId,
+      desiredPosition: studentForm.desiredPosition,
+      hoursPerWeek: studentForm.hoursPerWeek,
+      availableFrom: studentForm.availableFrom,
+      about: studentForm.about,
+      max: studentForm.max,
+      employmentTypes: [...studentForm.employmentTypes].sort(),
+      workFormats: [...studentForm.workFormats].sort(),
+      skills: [...studentForm.skills].sort((left, right) => left.skillId.localeCompare(right.skillId)),
+      languages: [...studentForm.languages].sort((left, right) => left.languageId.localeCompare(right.languageId))
+    })
+  );
+  const isStudentDirty = computed(() => studentFormState.value !== studentSavedState.value);
   const preferredMode = computed<ProfileMode>(() => {
     return authStore.user?.roles.includes("MENTOR") ? "mentor" : "student";
   });
@@ -88,10 +115,15 @@ export const useProfilesStore = defineStore("profiles", () => {
     studentForm.max = profile.max ?? "";
     studentForm.employmentTypes = [...profile.employmentTypes];
     studentForm.workFormats = [...profile.workFormats];
-    studentForm.skillId = profile.skills[0]?.skill.id ? String(profile.skills[0].skill.id) : "";
-    studentForm.skillLevel = profile.skills[0]?.level ?? "INTERMEDIATE";
-    studentForm.languageId = profile.languages[0]?.language.id ? String(profile.languages[0].language.id) : "";
-    studentForm.languageLevel = profile.languages[0]?.level ?? "B2";
+    studentForm.skills = profile.skills.map((skill) => ({
+      skillId: String(skill.skill.id),
+      level: skill.level
+    }));
+    studentForm.languages = profile.languages.map((language) => ({
+      languageId: String(language.language.id),
+      level: language.level
+    }));
+    studentSavedState.value = studentFormState.value;
   };
 
   const patchMentorForm = (profile: MentorProfileResponse) => {
@@ -134,21 +166,17 @@ export const useProfilesStore = defineStore("profiles", () => {
       workFormats: studentForm.workFormats.length
         ? [...studentForm.workFormats] as StudentProfileRequest["workFormats"]
         : null,
-      languages: studentForm.languageId
-        ? [
-            {
-              languageId: Number(studentForm.languageId),
-              level: studentForm.languageLevel as StudentProfileRequest["languages"][number]["level"]
-            }
-          ]
+      languages: studentForm.languages.length
+        ? studentForm.languages.map((language) => ({
+            languageId: Number(language.languageId),
+            level: language.level as StudentProfileRequest["languages"][number]["level"]
+          }))
         : null,
-      skills: studentForm.skillId
-        ? [
-            {
-              skillId: Number(studentForm.skillId),
-              level: studentForm.skillLevel as StudentProfileRequest["skills"][number]["level"]
-            }
-          ]
+      skills: studentForm.skills.length
+        ? studentForm.skills.map((skill) => ({
+            skillId: Number(skill.skillId),
+            level: skill.level as StudentProfileRequest["skills"][number]["level"]
+          }))
         : null
     };
   };
@@ -194,6 +222,46 @@ export const useProfilesStore = defineStore("profiles", () => {
     list.push(value);
   };
 
+  const addStudentSkill = (skillId: string, level: string) => {
+    if (!skillId || studentForm.skills.some((skill) => skill.skillId === skillId)) {
+      return;
+    }
+
+    studentForm.skills.push({ skillId, level });
+  };
+
+  const removeStudentSkill = (skillId: string) => {
+    studentForm.skills = studentForm.skills.filter((skill) => skill.skillId !== skillId);
+  };
+
+  const updateStudentSkillLevel = (skillId: string, level: string) => {
+    const target = studentForm.skills.find((skill) => skill.skillId === skillId);
+
+    if (target) {
+      target.level = level;
+    }
+  };
+
+  const addStudentLanguage = (languageId: string, level: string) => {
+    if (!languageId || studentForm.languages.some((language) => language.languageId === languageId)) {
+      return;
+    }
+
+    studentForm.languages.push({ languageId, level });
+  };
+
+  const removeStudentLanguage = (languageId: string) => {
+    studentForm.languages = studentForm.languages.filter((language) => language.languageId !== languageId);
+  };
+
+  const updateStudentLanguageLevel = (languageId: string, level: string) => {
+    const target = studentForm.languages.find((language) => language.languageId === languageId);
+
+    if (target) {
+      target.level = level;
+    }
+  };
+
   const loadStudentProfile = async () => {
     if (!canUseProfiles.value) {
       return;
@@ -208,7 +276,8 @@ export const useProfilesStore = defineStore("profiles", () => {
       patchStudentForm(response);
     } catch (rawError) {
       if (isProfileMissing(rawError)) {
-        studentProfile.value = null;
+      studentProfile.value = null;
+        studentSavedState.value = studentFormState.value;
         return;
       }
 
@@ -252,6 +321,7 @@ export const useProfilesStore = defineStore("profiles", () => {
       studentProfile.value = response;
       patchStudentForm(response);
       successMessage.value = "Профиль студента сохранён.";
+      studentSavedState.value = studentFormState.value;
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/profile/student");
     } finally {
@@ -293,16 +363,21 @@ export const useProfilesStore = defineStore("profiles", () => {
   };
 
   return {
+    addStudentLanguage,
+    addStudentSkill,
     canUseProfiles,
     error,
     initialize,
     isBusy,
+    isStudentDirty,
     loadMentorProfile,
     loadStudentProfile,
     mentorForm,
     mentorProfile,
     mode,
     preferredMode,
+    removeStudentLanguage,
+    removeStudentSkill,
     saveMentorProfile,
     saveStudentProfile,
     setMode: (nextMode: ProfileMode) => {
@@ -313,6 +388,8 @@ export const useProfilesStore = defineStore("profiles", () => {
     studentForm,
     studentProfile,
     successMessage,
-    toggleItem
+    toggleItem,
+    updateStudentLanguageLevel,
+    updateStudentSkillLevel
   };
 });

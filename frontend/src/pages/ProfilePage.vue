@@ -1,22 +1,27 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { useRouter } from "vue-router";
 import { BaseButton, BaseInput, BaseSelect, Tabs } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useDictionariesStore } from "@/features/dictionaries/model/dictionaries-store";
 import { useProfilesStore } from "@/features/profile/model/profiles-store";
+import { useProfile, type StudentProfileSectionId } from "@/features/profile/model/use-profile";
+import ProfileAbout from "@/features/profile/ui/ProfileAbout.vue";
+import ProfileLanguages from "@/features/profile/ui/ProfileLanguages.vue";
+import ProfilePreview from "@/features/profile/ui/ProfilePreview.vue";
+import ProfileSection from "@/features/profile/ui/ProfileSection.vue";
+import ProfileSkills from "@/features/profile/ui/ProfileSkills.vue";
+import ProfileWorkPreferences from "@/features/profile/ui/ProfileWorkPreferences.vue";
 import {
-  employmentTypeOptions,
-  languageLevelOptions,
   mentoringChannelOptions,
   mentoringDurationOptions,
   mentoringTypeOptions,
   recruitmentStatusOptions,
-  skillLevelOptions,
-  workFormatOptions
+  skillLevelOptions
 } from "@/shared/lib/options";
-import { formatList, fullName, getOptionLabel } from "@/shared/lib/presenters";
 
+const router = useRouter();
 const authStore = useAuthStore();
 const dictionariesStore = useDictionariesStore();
 const profilesStore = useProfilesStore();
@@ -26,14 +31,23 @@ const { cities, error: dictionariesError, isLoaded, isLoading, languages, skills
 const {
   error,
   isBusy,
+  isStudentDirty,
   mentorForm,
-  mentorProfile,
   mode,
   preferredMode,
   studentForm,
-  studentProfile,
   successMessage
 } = storeToRefs(profilesStore);
+const {
+  completionPercent,
+  completionTasks,
+  hasUnsavedStudentChanges,
+  nextTasks,
+  preview,
+  studentProfileSections
+} = useProfile();
+
+const activeStudentSection = ref<StudentProfileSectionId>("main");
 
 const availableModes = computed(() => {
   return preferredMode.value === "mentor" ? ["Ментор"] : ["Студент"];
@@ -90,9 +104,21 @@ const activeRoleHint = computed(() => {
   }
 
   return user.value.roles.includes("MENTOR")
-    ? "Для текущего аккаунта доступен только профиль ментора."
-    : "Для текущего аккаунта доступен только профиль студента."
+    ? "Для текущего аккаунта доступен профиль ментора."
+    : "Заполните профиль по шагам, чтобы менторам было проще оценить ваш запрос.";
 });
+
+const isSectionComplete = (sectionId: StudentProfileSectionId) => {
+  if (sectionId === "main") {
+    return completionTasks.value.find((task) => task.id === "main")?.done;
+  }
+
+  return completionTasks.value.find((task) => task.id === sectionId)?.done;
+};
+
+const saveStudentProfile = async () => {
+  await profilesStore.saveStudentProfile();
+};
 
 watch(
   () => isAuthenticated.value,
@@ -114,20 +140,36 @@ watch(
     </div>
 
     <template v-else>
-      <article class="app-panel">
-        <p class="section-kicker">Профиль</p>
-        <h3 class="section-title">Личный кабинет</h3>
-        <p class="section-copy">{{ activeRoleHint }}</p>
-        <Tabs v-if="showModeTabs" v-model:active-tab="activeTab" class="base-tabs" :tabs="profileTabs" />
-        <div class="base-actions mt-4">
-          <BaseButton
-            variant="secondary"
-            size="l"
-            :label="isBusy ? 'Загрузка...' : 'Обновить данные'"
-            :loading="isBusy"
-            @click="mode === 'student' ? profilesStore.loadStudentProfile() : profilesStore.loadMentorProfile()"
-          />
+      <article class="app-panel profile-workspace-header">
+        <div class="workspace-header">
+          <div>
+            <h1 class="workspace-title">{{ currentProfileTitle }}</h1>
+            <p class="workspace-subtitle">{{ activeRoleHint }}</p>
+          </div>
+          <div class="profile-save-state">
+            <span v-if="mode === 'student'">
+              {{ hasUnsavedStudentChanges ? "Есть изменения" : "Сохранено" }}
+            </span>
+            <div class="base-actions">
+              <BaseButton
+                variant="secondary"
+                size="m"
+                :label="isBusy ? 'Загрузка...' : 'Обновить'"
+                :loading="isBusy"
+                @click="mode === 'student' ? profilesStore.loadStudentProfile() : profilesStore.loadMentorProfile()"
+              />
+              <BaseButton
+                size="m"
+                :label="mode === 'student' && isStudentDirty ? 'Сохранить изменения' : 'Сохранить'"
+                :disabled="isBusy"
+                :loading="isBusy"
+                @click="mode === 'student' ? saveStudentProfile() : profilesStore.saveMentorProfile()"
+              />
+            </div>
+          </div>
         </div>
+
+        <Tabs v-if="showModeTabs" v-model:active-tab="activeTab" class="base-tabs" :tabs="profileTabs" />
 
         <div v-if="dictionariesError" class="error-state mt-4">
           {{ dictionariesError.message }}
@@ -138,122 +180,122 @@ watch(
         </div>
       </article>
 
-      <div class="split-grid">
-        <article v-if="mode === 'student'" class="app-panel">
-          <p class="section-kicker">Студент</p>
-          <h3 class="section-title">Профиль студента</h3>
-
-          <div class="form-grid mt-6">
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput v-model="studentForm.firstName" title="Имя" />
-              <BaseInput v-model="studentForm.lastName" title="Фамилия" />
-            </div>
-
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput v-model="studentForm.middleName" title="Отчество" />
-              <BaseInput v-model="studentForm.phone" title="Телефон" />
-            </div>
-
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect
-                v-model="studentForm.cityId"
-                size="m"
-                title="Город"
-                placeholder="Не выбран"
-                :state="citySelectState"
-                :options="cityOptions"
-              />
-              <BaseInput v-model="studentForm.desiredPosition" title="Желаемая позиция" />
-            </div>
-
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput
-                :model-value="studentForm.hoursPerWeek ? String(studentForm.hoursPerWeek) : ''"
-                title="Часов в неделю"
-                type="number"
-                @update:model-value="studentForm.hoursPerWeek = $event ? Number($event) : null"
-              />
-              <div class="profile-input-shell profile-input-shell--date base-input base-input__default base-input__size-m">
-                <label class="base-input__title">Доступен с</label>
-                <div class="input">
-                  <input v-model="studentForm.availableFrom" type="date" />
+      <template v-if="mode === 'student'">
+        <div class="student-profile-layout">
+          <main class="student-profile-editor">
+            <article class="app-panel profile-completion-panel">
+              <div class="workspace-header">
+                <div>
+                  <p class="section-kicker">Заполненность</p>
+                  <h3 class="section-title">{{ completionPercent }}%</h3>
                 </div>
+                <span class="profile-save-pill">{{ hasUnsavedStudentChanges ? "Черновик" : "Сохранено" }}</span>
               </div>
-            </div>
-
-            <div class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
-              <label class="base-input__title">О себе</label>
-              <div class="input">
-                <textarea v-model="studentForm.about"></textarea>
+              <div class="progress-card__bar progress-card__bar--contrast">
+                <div class="progress-card__fill" :style="{ width: `${completionPercent}%` }"></div>
               </div>
-            </div>
+              <ul class="profile-checklist">
+                <li
+                  v-for="task in completionTasks"
+                  :key="task.id"
+                  :class="{ 'profile-checklist__item--done': task.done }"
+                >
+                  <span></span>
+                  {{ task.label }}
+                </li>
+              </ul>
+              <p v-if="nextTasks.length" class="section-copy">
+                Ближайший шаг: {{ nextTasks[0].label }}.
+              </p>
+            </article>
 
-            <BaseInput v-model="studentForm.max" title="Контакт" />
+            <div class="profile-section-stack">
+              <ProfileSection
+                v-for="section in studentProfileSections"
+                :key="section.id"
+                :title="section.title"
+                :summary="section.summary"
+                :is-open="activeStudentSection === section.id"
+                :is-complete="isSectionComplete(section.id)"
+                @open="activeStudentSection = section.id"
+              >
+                <div v-if="section.id === 'main'" class="student-section-grid">
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseInput v-model="studentForm.firstName" title="Имя" placeholder="Имя" />
+                    <BaseInput v-model="studentForm.lastName" title="Фамилия" placeholder="Фамилия" />
+                  </div>
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseSelect
+                      v-model="studentForm.cityId"
+                      size="m"
+                      title="Город"
+                      placeholder="Не выбран"
+                      :state="citySelectState"
+                      :options="cityOptions"
+                    />
+                    <BaseInput
+                      v-model="studentForm.desiredPosition"
+                      title="Желаемая позиция"
+                      placeholder="Frontend Developer"
+                    />
+                  </div>
+                </div>
 
-            <div class="field">
-              <span>Формат занятости</span>
-              <div class="choice-grid choice-grid--checkbox choice-button-grid">
-                <BaseButton
-                  v-for="option in employmentTypeOptions"
-                  :key="option.value"
-                  block
-                  size="l"
-                  variant="secondary"
-                  :active="studentForm.employmentTypes.includes(option.value)"
-                  :label="option.label"
-                  @click="profilesStore.toggleItem(studentForm.employmentTypes, option.value)"
+                <ProfileAbout
+                  v-else-if="section.id === 'about'"
+                  v-model:about="studentForm.about"
+                  v-model:max="studentForm.max"
                 />
-              </div>
-            </div>
 
-            <div class="field">
-              <span>Формат работы</span>
-              <div class="choice-grid choice-grid--checkbox choice-button-grid">
-                <BaseButton
-                  v-for="option in workFormatOptions"
-                  :key="option.value"
-                  block
-                  size="l"
-                  variant="secondary"
-                  :active="studentForm.workFormats.includes(option.value)"
-                  :label="option.label"
-                  @click="profilesStore.toggleItem(studentForm.workFormats, option.value)"
+                <ProfileSkills
+                  v-else-if="section.id === 'skills'"
+                  :skills="studentForm.skills"
+                  :skill-options="skillOptions"
+                  :select-state="skillSelectState"
+                  @add="profilesStore.addStudentSkill"
+                  @remove="profilesStore.removeStudentSkill"
+                  @update-level="profilesStore.updateStudentSkillLevel"
                 />
-              </div>
-            </div>
 
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect
-                v-model="studentForm.skillId"
-                size="m"
-                title="Ключевой навык"
-                placeholder="Не выбран"
-                :state="skillSelectState"
-                :options="skillOptions"
-              />
-              <BaseSelect v-model="studentForm.skillLevel" size="m" title="Уровень навыка" :options="skillLevelOptions" />
-            </div>
+                <ProfileWorkPreferences
+                  v-else-if="section.id === 'work'"
+                  v-model:hours-per-week="studentForm.hoursPerWeek"
+                  v-model:available-from="studentForm.availableFrom"
+                  :employment-types="studentForm.employmentTypes"
+                  :work-formats="studentForm.workFormats"
+                  @toggle-employment="profilesStore.toggleItem(studentForm.employmentTypes, $event)"
+                  @toggle-work-format="profilesStore.toggleItem(studentForm.workFormats, $event)"
+                />
 
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect
-                v-model="studentForm.languageId"
-                size="m"
-                title="Язык"
-                placeholder="Не выбран"
-                :state="languageSelectState"
-                :options="languageOptions"
-              />
-              <BaseSelect v-model="studentForm.languageLevel" size="m" title="Уровень языка" :options="languageLevelOptions" />
-            </div>
+                <ProfileLanguages
+                  v-else-if="section.id === 'languages'"
+                  :languages="studentForm.languages"
+                  :language-options="languageOptions"
+                  :select-state="languageSelectState"
+                  @add="profilesStore.addStudentLanguage"
+                  @remove="profilesStore.removeStudentLanguage"
+                  @update-level="profilesStore.updateStudentLanguageLevel"
+                />
 
-            <div class="base-actions">
-              <BaseButton size="l" label="Сохранить" :disabled="isBusy" :loading="isBusy" @click="profilesStore.saveStudentProfile" />
-              <BaseButton variant="secondary" size="l" label="Обновить" :disabled="isBusy" @click="profilesStore.loadStudentProfile" />
+                <div v-else class="profile-files-section">
+                  <div>
+                    <h3 class="section-title">Резюме и материалы</h3>
+                    <p class="section-copy">
+                      Файлы управляются в отдельном менеджере: резюме, портфолио, аватар и вложения.
+                    </p>
+                  </div>
+                  <BaseButton size="m" label="Открыть файлы" @click="router.push({ name: 'files' })" />
+                </div>
+              </ProfileSection>
             </div>
-          </div>
-        </article>
+          </main>
 
-        <article v-else class="app-panel">
+          <ProfilePreview :preview="preview" />
+        </div>
+      </template>
+
+      <div v-else class="profile-form-grid">
+        <article class="app-panel">
           <p class="section-kicker">Ментор</p>
           <h3 class="section-title">Профиль ментора</h3>
 
@@ -262,12 +304,10 @@ watch(
               <BaseInput v-model="mentorForm.firstName" title="Имя" />
               <BaseInput v-model="mentorForm.lastName" title="Фамилия" />
             </div>
-
             <div class="form-grid form-grid--two conductor-grid">
               <BaseInput v-model="mentorForm.position" title="Позиция" />
               <BaseInput v-model="mentorForm.department" title="Департамент" />
             </div>
-
             <div class="form-grid form-grid--two conductor-grid">
               <BaseSelect
                 v-model="mentorForm.cityId"
@@ -279,48 +319,18 @@ watch(
               />
               <BaseInput v-model="mentorForm.phone" title="Телефон" />
             </div>
-
             <div class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
               <label class="base-input__title">Описание</label>
-              <div class="input">
-                <textarea v-model="mentorForm.description"></textarea>
-              </div>
+              <div class="input"><textarea v-model="mentorForm.description"></textarea></div>
             </div>
-
-            <div class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
-              <label class="base-input__title">Чем могу помочь</label>
-              <div class="input">
-                <textarea v-model="mentorForm.canHelpWith"></textarea>
-              </div>
-            </div>
-
-            <div class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
-              <label class="base-input__title">Ожидания</label>
-              <div class="input">
-                <textarea v-model="mentorForm.expectations"></textarea>
-              </div>
-            </div>
-
             <div class="form-grid form-grid--two conductor-grid">
               <BaseSelect v-model="mentorForm.mentoringType" size="m" title="Тип" :options="mentoringTypeOptions" />
               <BaseSelect v-model="mentorForm.mentoringChannel" size="m" title="Канал" :options="mentoringChannelOptions" />
             </div>
-
             <div class="form-grid form-grid--two conductor-grid">
               <BaseSelect v-model="mentorForm.mentoringDuration" size="m" title="Длительность" :options="mentoringDurationOptions" />
               <BaseSelect v-model="mentorForm.recruitmentStatus" size="m" title="Статус набора" :options="recruitmentStatusOptions" />
             </div>
-
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput
-                :model-value="mentorForm.menteeLimit ? String(mentorForm.menteeLimit) : ''"
-                title="Лимит"
-                type="number"
-                @update:model-value="mentorForm.menteeLimit = $event ? Number($event) : null"
-              />
-              <BaseInput v-model="mentorForm.mentoringFrequency" title="Частота" />
-            </div>
-
             <div class="form-grid form-grid--two conductor-grid">
               <BaseSelect
                 v-model="mentorForm.skillId"
@@ -332,63 +342,16 @@ watch(
               />
               <BaseSelect v-model="mentorForm.skillLevel" size="m" title="Уровень" :options="skillLevelOptions" />
             </div>
-
-            <BaseInput v-model="mentorForm.max" title="Контакт" />
-
-            <div class="base-actions">
-              <BaseButton size="l" label="Сохранить" :disabled="isBusy" :loading="isBusy" @click="profilesStore.saveMentorProfile" />
-              <BaseButton variant="secondary" size="l" label="Обновить" :disabled="isBusy" @click="profilesStore.loadMentorProfile" />
-            </div>
           </div>
         </article>
+      </div>
 
-        <article class="profile-preview">
-          <p class="section-kicker">Просмотр</p>
-          <h3 class="profile-preview__title">Текущий {{ currentProfileTitle.toLowerCase() }}</h3>
+      <div v-if="successMessage" class="success-state mt-4">
+        {{ successMessage }}
+      </div>
 
-          <div class="profile-preview__body">
-            <div v-if="successMessage" class="success-state">
-              {{ successMessage }}
-            </div>
-
-            <div v-if="error" class="error-state">
-              {{ error.message }}
-            </div>
-
-            <template v-if="mode === 'student' && studentProfile">
-              <ul class="clean-list mentor-meta">
-                <li><span>ФИО</span><strong>{{ fullName(studentProfile) }}</strong></li>
-                <li><span>Город</span><strong>{{ studentProfile.city?.name ?? "—" }}</strong></li>
-                <li><span>Позиция</span><strong>{{ studentProfile.desiredPosition ?? "—" }}</strong></li>
-                <li><span>Формат работы</span><strong>{{ formatList(studentProfile.workFormats) }}</strong></li>
-                <li><span>Занятость</span><strong>{{ formatList(studentProfile.employmentTypes) }}</strong></li>
-                <li><span>Навык</span><strong>{{ studentProfile.skills[0]?.skill.name ?? "—" }}</strong></li>
-              </ul>
-            </template>
-
-            <template v-else-if="mode === 'mentor' && mentorProfile">
-              <ul class="clean-list mentor-meta">
-                <li><span>ФИО</span><strong>{{ fullName(mentorProfile) }}</strong></li>
-                <li><span>Позиция</span><strong>{{ mentorProfile.position ?? "—" }}</strong></li>
-                <li><span>Город</span><strong>{{ mentorProfile.city?.name ?? "—" }}</strong></li>
-                <li>
-                  <span>Формат</span>
-                  <strong>
-                    {{ getOptionLabel(mentoringTypeOptions, mentorProfile.mentoringType) }}
-                    /
-                    {{ getOptionLabel(mentoringChannelOptions, mentorProfile.mentoringChannel) }}
-                  </strong>
-                </li>
-                <li><span>Набор</span><strong>{{ getOptionLabel(recruitmentStatusOptions, mentorProfile.recruitmentStatus) }}</strong></li>
-                <li><span>Навык</span><strong>{{ mentorProfile.skills[0]?.skill.name ?? "—" }}</strong></li>
-              </ul>
-            </template>
-
-            <div v-else class="empty-state">
-              Данные профиля пока не загружены.
-            </div>
-          </div>
-        </article>
+      <div v-if="error" class="error-state mt-4">
+        {{ error.message }}
       </div>
     </template>
   </section>

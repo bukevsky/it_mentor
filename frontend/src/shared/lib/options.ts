@@ -52,9 +52,10 @@ export const mentoringRequestStatusOptions: Option<MentoringRequestStatus>[] = [
   { value: "COMPLETED", label: "Завершена" }
 ];
 
-export const roleOptions: Option<Extract<RoleCode, "STUDENT" | "MENTOR">>[] = [
+export const roleOptions: Option<RoleCode>[] = [
   { value: "STUDENT", label: "Студент" },
-  { value: "MENTOR", label: "Ментор" }
+  { value: "MENTOR", label: "Ментор" },
+  { value: "ADMIN", label: "Администратор" }
 ];
 
 export const employmentTypeOptions: Option<EmploymentType>[] = [

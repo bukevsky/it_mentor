@@ -1,5 +1,11 @@
-import type { StudentProfileRequest, StudentProfileResponse } from "@/shared/api/contracts";
+import type {
+  PagedResponse,
+  StudentProfileRequest,
+  StudentProfileResponse,
+  StudentSearchParams
+} from "@/shared/api/contracts";
 import { request } from "@/shared/api/http";
+import { buildQuery } from "@/shared/api/query";
 
 export const studentProfileApi = {
   upsert(payload: StudentProfileRequest) {
@@ -13,5 +19,8 @@ export const studentProfileApi = {
   },
   getById(id: number) {
     return request<StudentProfileResponse>(`/profiles/students/${id}`);
+  },
+  search(params: StudentSearchParams) {
+    return request<PagedResponse<StudentProfileResponse>>(`/profiles/students${buildQuery(params)}`);
   }
 };

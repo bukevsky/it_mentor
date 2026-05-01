@@ -31,6 +31,13 @@
 		<mapstruct.version>1.6.3</mapstruct.version>
 		<jjwt.version>0.12.6</jjwt.version>
 		<testcontainers.version>1.20.4</testcontainers.version>
+		<!-- SonarQube -->
+		<sonar.host.url>http://localhost:9090</sonar.host.url>
+		<sonar.projectKey>it-mentor</sonar.projectKey>
+		<sonar.projectName>IT Mentor</sonar.projectName>
+		<sonar.java.source>${java.version}</sonar.java.source>
+		<sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+		<sonar.exclusions>**/entity/**,**/dto/**,**/mapper/**,**/config/**</sonar.exclusions>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -196,6 +203,41 @@
 						</path>
 					</annotationProcessorPaths>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.sonarsource.scanner.maven</groupId>
+				<artifactId>sonar-maven-plugin</artifactId>
+				<version>4.0.0.4121</version>
 			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

@@ -1,78 +1,95 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { BaseButton, BaseInput, Status } from "conductor";
+import { useRouter } from "vue-router";
+import { BaseButton } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useChatStore } from "@/features/chat/model/chat-store";
-import { formatDateTime } from "@/shared/lib/presenters";
+import { useChat } from "@/features/chat/model/use-chat";
+import { useChatSocket } from "@/features/chat/model/use-chat-socket";
+import ChatHeader from "@/features/chat/ui/ChatHeader.vue";
+import ChatInput from "@/features/chat/ui/ChatInput.vue";
+import ChatList from "@/features/chat/ui/ChatList.vue";
+import ChatMessages from "@/features/chat/ui/ChatMessages.vue";
 
+defineProps<{
+  sidebarToggleLabel?: string;
+  sidebarToggleIcon?: string;
+  isSidebarVisible?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (event: "toggle-sidebar"): void;
+}>();
+
+const router = useRouter();
 const authStore = useAuthStore();
 const chatStore = useChatStore();
 
 const { isAuthenticated, user } = storeToRefs(authStore);
-const { activeChat, chats, error, form, isBusy, messages, successMessage } = storeToRefs(chatStore);
-const threadRef = ref<HTMLElement | null>(null);
+const {
+  error,
+  isLoadingChats,
+  isLoadingMessages,
+  isSending,
+  successMessage
+} = storeToRefs(chatStore);
+const {
+  activeChat,
+  activeRequestGoal,
+  canSendMessage,
+  dialogItems,
+  form,
+  hasAnyChats,
+  hasLoadedChats,
+  orderedMessages,
+  searchQuery,
+  selectedChatSubtitle,
+  selectedChatTitle
+} = useChat();
+const chatSocket = useChatSocket();
 
-const chatItems = computed(() => {
-  return [...(chats.value?.content ?? [])].sort(
-    (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-  );
-});
+const chatBodyRef = ref<HTMLElement | null>(null);
+const isThreadNearBottom = ref(true);
+const hasNewMessagesBelow = ref(false);
 
-const orderedMessages = computed(() => {
-  return [...(messages.value?.content ?? [])].sort(
-    (left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()
-  );
-});
+const openRequests = () => {
+  void router.push({ name: "requests" });
+};
 
-const selectedChatTitle = computed(() => {
-  return activeChat.value ? `Заявка #${activeChat.value.mentoringRequestId}` : "Выберите диалог";
-});
+const getThreadFeed = () => chatBodyRef.value?.querySelector<HTMLElement>(".chat-thread-feed") ?? null;
 
-const selectedChatSubtitle = computed(() => {
-  if (!activeChat.value) {
-    return "Откройте чат из списка слева или найдите его по ID заявки.";
+const updateThreadPosition = () => {
+  const feed = getThreadFeed();
+
+  if (!feed) {
+    isThreadNearBottom.value = true;
+    return;
   }
 
-  return getPeerLabel(activeChat.value);
-});
+  isThreadNearBottom.value = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
 
-const activeChatCreatedAt = computed(() => {
-  return activeChat.value ? formatDateTime(activeChat.value.createdAt) : "";
-});
-
-const activeChatRequestId = computed(() => {
-  return activeChat.value ? `#${activeChat.value.mentoringRequestId}` : "Не выбран";
-});
-
-const canSendMessage = computed(() => {
-  return Boolean(
-    activeChat.value &&
-    (form.value.body.trim().length > 0 || form.value.attachmentFileId.trim().length > 0)
-  );
-});
+  if (isThreadNearBottom.value) {
+    hasNewMessagesBelow.value = false;
+  }
+};
 
 const scrollThreadToBottom = async () => {
   await nextTick();
 
-  if (!threadRef.value) {
+  const feed = getThreadFeed();
+  if (!feed) {
     return;
   }
 
-  threadRef.value.scrollTop = threadRef.value.scrollHeight;
+  feed.scrollTop = feed.scrollHeight;
+  updateThreadPosition();
 };
 
-function getPeerLabel(chat: { studentUserId: number; mentorUserId: number }) {
-  if (user.value?.id === chat.studentUserId) {
-    return `Ментор · ID ${chat.mentorUserId}`;
-  }
-
-  if (user.value?.id === chat.mentorUserId) {
-    return `Студент · ID ${chat.studentUserId}`;
-  }
-
-  return `Студент ID ${chat.studentUserId} · Ментор ID ${chat.mentorUserId}`;
-}
+const handleSendMessage = () => {
+  void chatSocket.sendActiveMessage();
+  void scrollThreadToBottom();
+};
 
 watch(
   () => isAuthenticated.value,
@@ -82,152 +99,119 @@ watch(
     }
 
     void chatStore.loadChats();
+    void chatSocket.connect();
   },
   { immediate: true }
 );
 
 watch(
-  () => orderedMessages.value,
-  () => {
-    void scrollThreadToBottom();
-  },
-  { deep: true }
+  () => [activeChat.value?.id, orderedMessages.value.length],
+  ([nextChatId], [previousChatId]) => {
+    if (nextChatId !== previousChatId || isThreadNearBottom.value) {
+      void scrollThreadToBottom();
+      return;
+    }
+
+    hasNewMessagesBelow.value = true;
+  }
+);
+
+watch(
+  () => activeChat.value?.id,
+  (nextChatId) => {
+    if (nextChatId) {
+      chatSocket.subscribe(nextChatId);
+    }
+  }
 );
 </script>
 
 <template>
-  <section class="app-section">
+  <section class="app-section chat-page">
     <div v-if="!isAuthenticated" class="empty-state">
       Для работы с чатами нужно войти в систему.
     </div>
 
     <template v-else>
+      <div v-if="successMessage" class="chat-toast success-state">
+        {{ successMessage }}
+      </div>
+
       <div class="chat-workspace">
-        <aside class="app-panel chat-sidebar-panel">
-          <div class="chat-sidebar-panel__head">
-            <div>
-              <p class="section-kicker">Чаты</p>
-              <h3 class="section-title">Диалоги</h3>
-            </div>
+        <aside class="chat-left-column">
+          <div class="chat-sidebar-toolbar">
             <BaseButton
               variant="secondary"
               size="m"
-              :label="isBusy ? 'Обновление...' : 'Обновить'"
-              :loading="isBusy"
-              @click="chatStore.loadChats"
+              :start-icon="sidebarToggleIcon"
+              :label="sidebarToggleLabel || 'Скрыть меню'"
+              @click="emit('toggle-sidebar')"
             />
           </div>
 
-          <div class="chat-sidebar-search">
-            <BaseInput v-model="form.requestId" title="Открыть по ID заявки" placeholder="Например, 12" />
-            <BaseButton
-              variant="secondary"
-              size="l"
-              label="Найти чат"
-              :disabled="isBusy"
-              @click="chatStore.openByRequestId"
-            />
-          </div>
-
-          <div v-if="chatItems.length" class="chat-sidebar-list">
-            <button
-              v-for="chat in chatItems"
-              :key="chat.id"
-              type="button"
-              :class="['chat-sidebar-item', { 'chat-sidebar-item--active': activeChat?.id === chat.id }]"
-              @click="chatStore.loadMessages(chat.id)"
-            >
-              <div class="chat-sidebar-item__top">
-                <strong>Заявка #{{ chat.mentoringRequestId }}</strong>
-                <span>{{ formatDateTime(chat.createdAt) }}</span>
-              </div>
-              <div class="chat-sidebar-item__title">{{ getPeerLabel(chat) }}</div>
-              <div class="chat-sidebar-item__meta">
-                <span>Чат #{{ chat.id }}</span>
-                <span v-if="activeChat?.id === chat.id">Открыт сейчас</span>
-              </div>
-            </button>
-          </div>
-
-          <div v-else class="empty-state chat-sidebar-empty">
-            Чаты пока не найдены.
-          </div>
+          <ChatList
+            :items="dialogItems"
+            :search-query="searchQuery"
+            :is-loading="isLoadingChats"
+            :has-loaded="hasLoadedChats"
+            :has-any-chats="hasAnyChats"
+            @update:search-query="searchQuery = $event"
+            @open="chatStore.loadMessages"
+            @open-requests="openRequests"
+          />
         </aside>
 
-        <article class="app-panel chat-window-panel">
-          <header class="chat-window__header">
-            <div class="chat-window__heading">
-              <p class="section-kicker">Активный диалог</p>
-              <h3 class="section-title">{{ selectedChatTitle }}</h3>
-              <p class="section-copy">{{ selectedChatSubtitle }}</p>
-            </div>
-            <div v-if="activeChat" class="chat-window__summary">
-              <Status type="secondary" size="s" :label="`Заявка ${activeChatRequestId}`" />
-              <span>Открыт {{ activeChatCreatedAt }}</span>
-            </div>
-          </header>
+        <article class="app-panel chat-window-panel" :class="{ 'chat-window-panel--empty': !activeChat }">
+          <ChatHeader
+            v-if="activeChat"
+            :chat="activeChat"
+            :title="selectedChatTitle"
+            :subtitle="selectedChatSubtitle"
+            :request-goal="activeRequestGoal"
+            :socket-status-label="chatSocket.statusLabel.value"
+            :is-online="chatSocket.status.value === 'connected'"
+            @open-requests="openRequests"
+          />
 
           <div v-if="error" class="error-state mt-4">
             {{ error.message }}
           </div>
-          <div v-if="successMessage" class="success-state mt-4">
-            {{ successMessage }}
-          </div>
 
-          <div v-if="activeChat" class="chat-window__body">
-            <div ref="threadRef" class="chat-thread-feed">
-              <div v-if="orderedMessages.length" class="chat-thread-feed__stack">
-                <article
-                  v-for="message in orderedMessages"
-                  :key="message.id"
-                  :class="['chat-bubble', { 'chat-bubble--mine': message.senderUserId === user?.id }]"
-                >
-                  <div class="chat-bubble__meta">
-                    <strong>{{ message.senderUserId === user?.id ? 'Вы' : `ID ${message.senderUserId}` }}</strong>
-                    <span>{{ formatDateTime(message.createdAt) }}</span>
-                  </div>
-                  <div class="chat-bubble__body">
-                    {{ message.body || "Сообщение без текста" }}
-                  </div>
-                  <div v-if="message.attachment" class="chat-bubble__attachment">
-                    Вложение: {{ message.attachment.originalFilename }}
-                  </div>
-                </article>
-              </div>
+          <div v-if="activeChat" ref="chatBodyRef" class="chat-window__body">
+            <ChatMessages
+              :messages="orderedMessages"
+              :current-user-id="user?.id"
+              :is-loading="isLoadingMessages"
+              :peer-name="selectedChatTitle"
+              @scroll-state="isThreadNearBottom = $event"
+            />
+            <button
+              v-if="hasNewMessagesBelow"
+              type="button"
+              class="chat-new-messages-button"
+              @click="scrollThreadToBottom"
+            >
+              Новые сообщения
+            </button>
 
-              <div v-else class="empty-state chat-thread-feed__empty">
-                В этом диалоге пока нет сообщений.
-              </div>
-            </div>
-
-            <div class="chat-composer-card">
-              <BaseInput
-                v-model="form.attachmentFileId"
-                title="ID вложения"
-                placeholder="Опционально, из раздела Файлы"
-              />
-              <label class="chat-composer-card__field">
-                <span>Сообщение</span>
-                <textarea
-                  v-model="form.body"
-                  placeholder="Напишите сообщение по выбранной заявке."
-                ></textarea>
-              </label>
-              <div class="chat-composer-card__actions">
-                <BaseButton
-                  size="l"
-                  label="Отправить"
-                  :disabled="isBusy || !canSendMessage"
-                  :loading="isBusy"
-                  @click="chatStore.sendMessage"
-                />
-              </div>
-            </div>
+            <ChatInput
+              :body="form.body"
+              :disabled="!canSendMessage"
+              :is-sending="isSending"
+              @update:body="form.body = $event"
+              @send="handleSendMessage"
+            />
           </div>
 
           <div v-else class="chat-window__empty">
             <div class="empty-state">
-              Выберите диалог слева или откройте чат по ID заявки.
+              <h3 class="section-title">Выберите диалог</h3>
+              <p class="section-copy">
+                Слева показаны чаты по принятым заявкам. Если списка нет, откройте заявки и обработайте входящие обращения.
+              </p>
+              <div class="base-actions mt-4">
+                <BaseButton size="m" label="Открыть заявки" @click="openRequests" />
+              </div>
             </div>
           </div>
         </article>

@@ -5,6 +5,7 @@ import type {
   MentorCardResponse,
   MentorSearchParams,
   MentoringRequestCreateRequest,
+  MentoringRequestStatus,
   PagedResponse
 } from "@/shared/api/contracts";
 import { useAuthStore } from "@/features/auth/model/auth-store";
@@ -20,6 +21,15 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
   const isLoading = ref(false);
   const results = ref<PagedResponse<MentorCardResponse> | null>(null);
   const selectedMentor = ref<MentorCardResponse | null>(null);
+  const requestedMentorIds = ref<Set<number>>(new Set());
+
+  const excludedRequestStatuses: MentoringRequestStatus[] = [
+    "SENT",
+    "REVIEWING",
+    "NEEDS_CLARIFICATION",
+    "ACCEPTED",
+    "COMPLETED"
+  ];
 
   const searchForm = reactive({
     q: "",
@@ -36,6 +46,19 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
   });
 
   const mentorsCount = computed(() => results.value?.totalElements ?? 0);
+
+  const loadRequestedMentors = async () => {
+    const response = await mentoringApi.getList({
+      page: 0,
+      size: 100
+    });
+
+    requestedMentorIds.value = new Set(
+      response.content
+        .filter((request) => excludedRequestStatuses.includes(request.status))
+        .map((request) => request.mentorProfileId)
+    );
+  };
 
   const searchMentors = async () => {
     if (!authStore.isAuthenticated) {
@@ -58,7 +81,11 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
     };
 
     try {
-      results.value = await mentorProfileApi.search(params);
+      const [mentorResults] = await Promise.all([
+        mentorProfileApi.search(params),
+        loadRequestedMentors()
+      ]);
+      results.value = mentorResults;
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/profiles/mentors");
     } finally {
@@ -72,6 +99,11 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
     error.value = null;
   };
 
+  const clearSelectedMentor = () => {
+    selectedMentor.value = null;
+    error.value = null;
+  };
+
   const submitRequest = async () => {
     if (!selectedMentor.value) {
       error.value = {
@@ -81,7 +113,7 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
         message: "Сначала выберите ментора.",
         path: "/mentoring/requests"
       };
-      return;
+      return false;
     }
 
     isLoading.value = true;
@@ -96,9 +128,13 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
 
     try {
       await mentoringApi.create(payload);
+      requestedMentorIds.value = new Set([...requestedMentorIds.value, selectedMentor.value.id]);
       successMessage.value = "Заявка отправлена.";
+      selectedMentor.value = null;
+      return true;
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/mentoring/requests");
+      return false;
     } finally {
       isLoading.value = false;
     }
@@ -109,8 +145,11 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
     isLoading,
     mentorsCount,
     requestForm,
+    requestedMentorIds,
     results,
     searchForm,
+    clearSelectedMentor,
+    loadRequestedMentors,
     searchMentors,
     selectedMentor,
     selectMentor,

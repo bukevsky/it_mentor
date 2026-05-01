@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { BaseButton, BaseInput, Tabs } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
+import { getPrimaryWorkspaceRole } from "@/shared/lib/access";
 
 type AuthMode = "login" | "register" | "recover";
 
@@ -23,8 +24,8 @@ const successMessage = ref("");
 const authTabs = [{ name: "Вход" }, { name: "Регистрация" }, { name: "Сброс пароля" }];
 
 const loginForm = reactive({
-  email: "test.frontend@example.com",
-  password: "TestPass123!"
+  email: "student.demo@example.com",
+  password: "DemoPass123"
 });
 
 const registerForm = reactive({
@@ -35,7 +36,7 @@ const registerForm = reactive({
 });
 
 const recoveryForm = reactive({
-  email: "test.frontend@example.com",
+  email: "student.demo@example.com",
   code: "",
   newPassword: ""
 });
@@ -69,15 +70,19 @@ const activeTab = computed({
 
 const accessHighlights = [
   "Профиль",
-  "Каталог менторов",
+  "Менторы",
   "Заявки и чаты"
 ];
+
+const authenticatedRouteName = computed(() => {
+  return getPrimaryWorkspaceRole(user.value) === "ADMIN" ? "admin" : "profile";
+});
 
 watch(
   () => isAuthenticated.value,
   (nextValue) => {
     if (nextValue) {
-      void router.replace({ name: "profile" });
+      void router.replace({ name: authenticatedRouteName.value });
     }
   },
   { immediate: true }
@@ -89,7 +94,7 @@ const submitLogin = async () => {
 
   if (result) {
     successMessage.value = "Вход выполнен.";
-    void router.push({ name: "home" });
+    void router.push({ name: authenticatedRouteName.value });
   }
 };
 
@@ -256,13 +261,20 @@ const submitReset = async () => {
         </div>
       </article>
 
-      <article class="auth-card">
-        <p class="section-kicker">Доступ</p>
-        <h3 class="section-title">{{ isAuthenticated ? "Аккаунт готов" : "После входа откроется" }}</h3>
+      <article class="auth-card auth-card--blue">
+        <p class="section-kicker">Mentor Portal</p>
+        <h3 class="workspace-title">{{ isAuthenticated ? "Аккаунт готов" : "Ваш инструмент для эффективного менторства" }}</h3>
+        <p class="section-copy">
+          Единая рабочая среда для профилей, заявок, чатов и материалов по практикам и стажировкам.
+        </p>
 
-        <div class="detail-stack mt-6">
-          <div v-for="item in accessHighlights" :key="item" class="empty-state">
-            {{ item }}
+        <div class="auth-feature-list">
+          <div v-for="item in accessHighlights" :key="item" class="quick-action">
+            <span class="metric-card__icon">{{ item.slice(0, 1) }}</span>
+            <div>
+              <strong>{{ item }}</strong>
+              <p class="section-copy">Рабочий сценарий откроется после авторизации.</p>
+            </div>
           </div>
         </div>
 
@@ -272,7 +284,7 @@ const submitReset = async () => {
 
         <div v-if="isAuthenticated" class="base-actions mt-6">
           <BaseButton label="Перейти в профиль" @click="router.push({ name: 'profile' })" />
-          <BaseButton variant="secondary" label="Открыть каталог менторов" @click="router.push({ name: 'mentors' })" />
+          <BaseButton variant="secondary" label="Открыть менторов" @click="router.push({ name: 'mentors' })" />
         </div>
       </article>
     </div>

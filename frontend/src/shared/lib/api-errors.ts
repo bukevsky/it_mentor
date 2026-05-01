@@ -19,9 +19,46 @@ export const isHealthResponse = (value: unknown): value is HealthResponse => {
   return Boolean(isRecord(value) && typeof value.status === "string");
 };
 
+const getHttpErrorMessage = (status: number, fallbackMessage: string) => {
+  if (fallbackMessage && !fallbackMessage.startsWith("Request failed with status")) {
+    return fallbackMessage;
+  }
+
+  if (status === 400) {
+    return "Проверьте введенные данные и попробуйте еще раз.";
+  }
+
+  if (status === 401 || status === 403) {
+    return "Неверный email или пароль.";
+  }
+
+  if (status === 404) {
+    return "Запрошенные данные не найдены.";
+  }
+
+  if (status >= 500) {
+    return "Сервер не смог обработать запрос. Попробуйте позже.";
+  }
+
+  return "Не удалось выполнить запрос к backend.";
+};
+
 export const normalizeErrorResponse = (rawError: unknown, fallbackPath = ""): ErrorResponse => {
   if (rawError instanceof ApiError && isErrorResponse(rawError.payload)) {
     return rawError.payload;
+  }
+
+  if (rawError instanceof ApiError) {
+    return {
+      timestamp: new Date().toISOString(),
+      status: rawError.status,
+      error: "HTTP_ERROR",
+      message:
+        rawError.status >= 500 && rawError.payload === null
+          ? "Backend API недоступен. Запустите сервер и попробуйте снова."
+          : getHttpErrorMessage(rawError.status, rawError.message),
+      path: fallbackPath
+    };
   }
 
   if (rawError instanceof Error) {

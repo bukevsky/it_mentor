@@ -20,7 +20,8 @@
 | Кодогенерация      | Lombok                                                  |
 | API-документация   | springdoc-openapi 3.0.2 — Swagger UI                    |
 | Тестирование       | JUnit 5, Mockito, AssertJ, Testcontainers 1.20.4        |
-| Контейнеризация    | Docker Compose (PostgreSQL + MinIO)                     |
+| Контейнеризация    | Docker Compose (PostgreSQL + MinIO + MailHog)           |
+| Качество кода      | SonarQube 26.x + sonarqube-community-branch-plugin      |
 
 ---
 
@@ -34,17 +35,21 @@
 
 ### 1. Запуск инфраструктуры
 
+Для локальной разработки и запуска приложения:
+
 ```bash
-docker compose up -d
+docker compose up -d postgres minio mailhog
 ```
 
-Это поднимет:
+| Сервис       | Порт(ы)        | Назначение                  |
+| :----------- | :------------- | :-------------------------- |
+| PostgreSQL   | `5432`         | Основная база данных         |
+| MinIO API    | `9000`         | Хранилище файлов (S3 API)   |
+| MinIO UI     | `9001`         | Веб-консоль MinIO           |
+| MailHog SMTP | `1025`         | Перехват email (OTP-коды)   |
+| MailHog UI   | `8025`         | Просмотр писем в браузере   |
 
-| Сервис     | Порт     | Назначение                  |
-| :--------- | :------- | :-------------------------- |
-| PostgreSQL | `5432`   | Основная база данных         |
-| MinIO API  | `9000`   | Хранилище файлов (S3 API)   |
-| MinIO UI   | `9001`   | Веб-консоль MinIO           |
+SonarQube запускается отдельно, только когда нужен анализ кода (см. раздел [Анализ кода](#анализ-кода-sonarqube)).
 
 ### 2. Сборка проекта
 
@@ -173,6 +178,34 @@ Query params для поиска: `q`, `skillIds[]`, `cityId`, `recruitmentStatu
 | `POST` | `/chats/{chatId}/messages`          | JWT    | Отправить сообщение                            |
 
 Чат создаётся автоматически при принятии заявки на менторство. Доступ только участникам.
+
+#### Что нужно добавить для полноценного мессенджера
+
+Текущий backend покрывает базовый REST-сценарий: список чатов, загрузка истории и отправка сообщения. Для интерфейса уровня полноценного мессенджера не хватает:
+
+- WebSocket/SSE realtime-канала.
+  Нужны подключение, подписка на конкретный чат, доставка новых сообщений участникам, событие обновления списка диалогов и fallback/reconnect-сценарий. Сейчас фронт вынужден использовать mock WebSocket.
+
+- Модели прочитанности.
+  Нужны `lastReadMessageId` или `lastReadAt` по участнику чата, endpoint вроде `POST /chats/{chatId}/read`, поля `unreadCount` и общий счетчик непрочитанных сообщений.
+
+- Расширенного `ChatResponse` для списка диалогов.
+  Сейчас фронту нужны дополнительные запросы за последним сообщением и деталями заявки. Желательный контракт: `lastMessage`, `lastMessageAt`, `lastSenderUserId`, `unreadCount`, краткие данные собеседника (`peerUserId`, `peerName`, `peerRole`) и краткая заявка (`requestId`, `requestStatus`, `requestGoalType`).
+
+- Событий доставки сообщения.
+  Для статусов `sending/sent/error` frontend может работать сам, но для реального realtime нужны server-side ack/event с финальным `messageId`, временем создания и ошибкой доставки, если сообщение не принято.
+
+- Корректной сортировки по последней активности.
+  `GET /chats` лучше сортировать по `lastMessageAt DESC`, а не только по `createdAt DESC`, чтобы активные диалоги поднимались наверх.
+
+- Контракта для вложений в сообщениях.
+  Загрузка файла есть через `/files/chat-attachment`, но для production-сценария нужны ограничения размера/типов, проверка доступа к файлу, download URL или endpoint скачивания, а также связь с сообщением без ручного ввода `attachmentFileId` в UI.
+
+- Cursor/keyset pagination для истории.
+  Для длинных переписок удобнее `beforeMessageId`/`beforeCreatedAt` и `limit`, чем обычные страницы, потому что новые сообщения меняют состав страниц.
+
+- Индикаторов присутствия и typing.
+  Если нужен Telegram-like UX, backend должен отдавать события `typing`, `online/offline` или хотя бы heartbeat/lastSeen для участников.
 
 ### Файлы (`/files`)
 
@@ -335,6 +368,32 @@ Liquibase-миграции расположены в `src/main/resources/db/chan
 
 ---
 
+## Анализ кода (SonarQube)
+
+SonarQube Community Edition с плагином [sonarqube-community-branch-plugin](https://github.com/mc1arke/sonarqube-community-branch-plugin) (добавляет поддержку веток в бесплатной версии).
+
+### Запуск
+
+```bash
+# 1. Поднять SonarQube (первый запуск занимает ~60 секунд)
+docker compose up -d sonarqube
+
+# 2. Открыть http://localhost:9090, войти admin/admin, сгенерировать токен:
+#    My Account → Security → Generate Tokens
+
+# 3. Запустить анализ с покрытием
+./mvnw clean verify sonar:sonar -Dsonar.branch.name=develop -Dsonar.token=<TOKEN>
+```
+
+Результат доступен в браузере: `http://localhost:9090` → проект **IT Mentor** → выбрать ветку `develop`.
+
+Если тесты уже прогнаны (`target/jacoco.exec` существует), можно пропустить `clean verify`:
+```bash
+./mvnw sonar:sonar -Dsonar.branch.name=develop -Dsonar.token=<TOKEN>
+```
+
+---
+
 ## Тестирование
 
 ### Запуск тестов
@@ -406,7 +465,8 @@ findByUserId → (нет?) → builder.build()
 
 ```
 it.mentor/
-├── docker-compose.yml                 PostgreSQL + MinIO
+├── docker-compose.yml                 PostgreSQL + MinIO + MailHog + SonarQube
+├── sonar/plugins/                     sonarqube-community-branch-plugin.jar
 ├── pom.xml                            Maven конфигурация
 ├── mvnw                               Maven Wrapper
 ├── CLAUDE.md                          Инструкции для AI-ассистента

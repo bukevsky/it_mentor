@@ -19,6 +19,7 @@ import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.MentorProfileSpecification;
 import com.example.it.mentor.repository.MentorSkillRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -33,6 +34,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MentorProfileService {
@@ -50,6 +52,8 @@ public class MentorProfileService {
 
         MentorProfile profile = profileRepository.findByUserId(user.getId())
                 .orElseGet(() -> MentorProfile.builder().user(user).build());
+
+        boolean isNew = profile.getId() == null;
 
         profile.setFirstName(request.firstName());
         profile.setLastName(request.lastName());
@@ -84,6 +88,7 @@ public class MentorProfileService {
 
         replaceSkills(profile, request);
         profileRepository.save(profile);
+        log.info("{} профиль ментора: userId={}, profileId={}, recruitmentStatus={}", isNew ? "Создан" : "Обновлён", user.getId(), profile.getId(), profile.getRecruitmentStatus());
 
         return mapper.toResponse(
                 profileRepository.findWithDetailsByUserId(user.getId())
@@ -103,6 +108,7 @@ public class MentorProfileService {
     public PagedResponse<MentorCardResponse> searchMentors(MentorSearchFilter filter, Pageable pageable) {
         Specification<MentorProfile> spec = MentorProfileSpecification.build(filter);
         Page<MentorProfile> page = profileRepository.findAll(spec, pageable);
+        log.debug("Поиск менторов: total={}, page={}, size={}", page.getTotalElements(), pageable.getPageNumber(), pageable.getPageSize());
         if (page.isEmpty()) {
             return PagedResponse.from(page.map(mapper::toCardResponse));
         }

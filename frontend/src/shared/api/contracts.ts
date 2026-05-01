@@ -54,6 +54,7 @@ export type MentoringRequestStatus =
   | "COMPLETED";
 
 export type FileType = "RESUME" | "PORTFOLIO" | "CHAT_ATTACHMENT" | "AVATAR";
+export type ReviewStatus = "PUBLISHED" | "MODERATION" | "REJECTED";
 
 export interface RegisterRequest {
   email: string;
@@ -300,6 +301,17 @@ export interface MentorSearchParams {
   sort?: string;
 }
 
+export interface StudentSearchParams {
+  q?: string;
+  skillIds?: number[];
+  cityId?: number;
+  employmentType?: EmploymentType;
+  workFormat?: WorkFormat;
+  page?: number;
+  size?: number;
+  sort?: string;
+}
+
 export interface MentoringRequestCreateRequest {
   targetProfileId: number;
   goalType: MentoringType;
@@ -341,6 +353,43 @@ export interface MentoringRequestResponse {
   reason: string | null;
   createdAt: string;
   respondedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface ReviewParticipant {
+  id: number;
+  name: string;
+  role: Exclude<RoleCode, "ADMIN">;
+}
+
+export interface ReviewResponse {
+  id: number;
+  mentoringRequestId: number;
+  author: ReviewParticipant;
+  recipient: ReviewParticipant;
+  rating: number;
+  comment: string;
+  status: ReviewStatus;
+  createdAt: string;
+}
+
+export interface ReviewSummaryResponse {
+  averageRating: number;
+  totalReviews: number;
+  moderationCount: number;
+  distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+}
+
+export interface ReviewCreateRequest {
+  mentoringRequestId: number;
+  rating: number;
+  comment: string;
+}
+
+export interface ReviewableRequest {
+  id: number;
+  participant: ReviewParticipant;
+  goalType: string;
   completedAt: string | null;
 }
 

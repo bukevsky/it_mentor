@@ -1,59 +1,29 @@
 <script setup lang="ts">
-import { ref } from "vue";
 import { storeToRefs } from "pinia";
-import { BaseButton } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useFilesStore } from "@/features/files/model/files-store";
-import { formatDateTime } from "@/shared/lib/presenters";
-
-type UploadKind = "resume" | "portfolio" | "avatar" | "chat-attachment";
+import { useFiles } from "@/features/files/model/use-files";
+import FileList from "@/features/files/ui/FileList.vue";
+import FileUploader from "@/features/files/ui/FileUploader.vue";
 
 const authStore = useAuthStore();
 const filesStore = useFilesStore();
 
 const { isAuthenticated } = storeToRefs(authStore);
-const { error, isUploading, responses, selectedFiles } = storeToRefs(filesStore);
-
-const inputRefs = ref<Partial<Record<UploadKind, HTMLInputElement | null>>>({});
-
-const setInputRef = (kind: UploadKind, element: HTMLInputElement | null) => {
-  inputRefs.value[kind] = element;
-};
-
-const openFilePicker = (kind: UploadKind) => {
-  inputRefs.value[kind]?.click();
-};
-
-const uploadCards: Array<{
-  kind: UploadKind;
-  title: string;
-  accept?: string;
-  hint: string;
-}> = [
-  {
-    kind: "resume",
-    title: "Резюме",
-    accept: "application/pdf",
-    hint: "PDF, рекомендуется до 5 MB"
-  },
-  {
-    kind: "portfolio",
-    title: "Портфолио",
-    accept: "application/pdf,image/png,image/jpeg",
-    hint: "PDF, PNG или JPEG, до 10 MB"
-  },
-  {
-    kind: "avatar",
-    title: "Аватар",
-    accept: "image/png,image/jpeg,image/webp",
-    hint: "PNG, JPEG или WebP, до 2 MB"
-  },
-  {
-    kind: "chat-attachment",
-    title: "Вложение в чат",
-    hint: "После загрузки используйте fileId при отправке сообщения"
-  }
-];
+const {
+  activeCategory,
+  activeKind,
+  counters,
+  currentUpload,
+  error,
+  fileCategories,
+  formatFileSize,
+  isUploading,
+  successMessage,
+  totalSize,
+  uploadToActiveCategory,
+  visibleFiles
+} = useFiles();
 </script>
 
 <template>
@@ -63,66 +33,73 @@ const uploadCards: Array<{
     </div>
 
     <template v-else>
-      <article class="app-panel">
-        <p class="section-kicker">Файлы</p>
-        <h3 class="section-title">Резюме, портфолио, аватар и вложения</h3>
-        <p class="section-copy">
-          Сначала выберите файл в карточке, затем отправьте его на backend. После загрузки ниже появятся fileId и метаданные.
-        </p>
+      <article class="app-panel files-manager">
+        <div class="files-manager__header">
+          <div>
+            <p class="section-kicker">Файлы</p>
+            <h1 class="workspace-title">Менеджер файлов</h1>
+            <p class="workspace-subtitle">
+              Документы профиля, портфолио, аватар и вложения для чата в одном списке.
+            </p>
+          </div>
+          <div class="files-manager__stats">
+            <span>{{ counters.all }} файлов</span>
+            <strong>{{ formatFileSize(totalSize) }}</strong>
+          </div>
+        </div>
+
+        <div class="files-manager__body">
+          <aside class="file-type-list" aria-label="Типы файлов">
+            <button
+              v-for="category in fileCategories"
+              :key="category.kind"
+              type="button"
+              :class="['file-type-item', { 'file-type-item--active': activeKind === category.kind }]"
+              @click="activeKind = category.kind"
+            >
+              <span>
+                <strong>{{ category.label }}</strong>
+                <small>{{ category.description }}</small>
+              </span>
+              <em>{{ counters[category.kind] }}</em>
+            </button>
+          </aside>
+
+          <main class="files-workspace">
+            <FileUploader
+              :category="activeCategory"
+              :current-upload="currentUpload"
+              :is-uploading="isUploading"
+              @upload="uploadToActiveCategory"
+            />
+
+            <div class="files-toolbar">
+              <div>
+                <h3 class="section-title">{{ activeCategory.label }}</h3>
+                <p class="section-copy">{{ visibleFiles.length }} элементов</p>
+              </div>
+              <div class="files-toolbar__legend">
+                <span>Загружен</span>
+                <span>Ошибка</span>
+              </div>
+            </div>
+
+            <FileList
+              :files="visibleFiles"
+              @download="filesStore.download"
+              @delete="filesStore.remove"
+              @replace="filesStore.replace"
+              @retry="filesStore.retry"
+            />
+          </main>
+        </div>
       </article>
 
-      <div class="files-grid">
-        <article v-for="card in uploadCards" :key="card.kind" class="upload-card">
-          <div>
-            <h4 class="request-card__title">{{ card.title }}</h4>
-            <p class="request-card__copy">{{ card.hint }}</p>
-          </div>
-
-          <input
-            :ref="(element) => setInputRef(card.kind, element as HTMLInputElement | null)"
-            class="hidden-file-input"
-            :accept="card.accept"
-            type="file"
-            @change="filesStore.onChange(card.kind, $event)"
-          />
-
-          <div class="file-picker">
-            <div class="file-picker__summary">
-              <span class="file-picker__label">Файл</span>
-              <strong class="file-picker__name">
-                {{ selectedFiles[card.kind]?.name ?? "Файл ещё не выбран" }}
-              </strong>
-            </div>
-            <BaseButton
-              variant="secondary"
-              size="m"
-              label="Выбрать файл"
-              @click="openFilePicker(card.kind)"
-            />
-          </div>
-
-          <div class="upload-card__actions">
-            <BaseButton
-              size="l"
-              :label="isUploading ? 'Загрузка...' : 'Загрузить'"
-              :loading="isUploading"
-              :disabled="!selectedFiles[card.kind]"
-              @click="filesStore.upload(card.kind)"
-            />
-          </div>
-
-          <div v-if="responses[card.kind]" class="detail-stack">
-            <ul class="clean-list upload-meta">
-              <li><span>ID</span><strong>{{ responses[card.kind]?.id }}</strong></li>
-              <li><span>Имя файла</span><strong>{{ responses[card.kind]?.originalFilename }}</strong></li>
-              <li><span>Тип</span><strong>{{ responses[card.kind]?.fileType }}</strong></li>
-              <li><span>Дата</span><strong>{{ formatDateTime(responses[card.kind]?.uploadedAt) }}</strong></li>
-            </ul>
-          </div>
-        </article>
+      <div v-if="successMessage" class="success-state file-toast">
+        {{ successMessage }}
       </div>
 
-      <div v-if="error" class="error-state">
+      <div v-if="error" class="error-state file-toast">
         {{ error.message }}
       </div>
     </template>

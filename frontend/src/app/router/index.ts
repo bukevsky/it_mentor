@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import type { RouteRecordRaw } from "vue-router";
+import { useAuthStore } from "@/features/auth/model/auth-store";
 import AuthPage from "@/pages/AuthPage.vue";
 import ChatPage from "@/pages/ChatPage.vue";
 import FilesPage from "@/pages/FilesPage.vue";
@@ -7,6 +8,11 @@ import HomePage from "@/pages/HomePage.vue";
 import MentorsPage from "@/pages/MentorsPage.vue";
 import ProfilePage from "@/pages/ProfilePage.vue";
 import RequestsPage from "@/pages/RequestsPage.vue";
+import StudentsPage from "@/pages/StudentsPage.vue";
+import ReviewsPage from "@/pages/ReviewsPage.vue";
+import AdminPage from "@/pages/AdminPage.vue";
+import type { AccessRole } from "@/shared/lib/access";
+import { hasAnyRole } from "@/shared/lib/access";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -32,6 +38,8 @@ const routes: RouteRecordRaw[] = [
     name: "profile",
     component: ProfilePage,
     meta: {
+      requiresAuth: true,
+      roles: ["STUDENT", "MENTOR"],
       title: "Мой профиль",
       description: "Личные данные, профиль студента и профиль ментора."
     }
@@ -41,8 +49,21 @@ const routes: RouteRecordRaw[] = [
     name: "mentors",
     component: MentorsPage,
     meta: {
+      requiresAuth: true,
+      roles: ["STUDENT"],
       title: "Менторы",
       description: "Поиск, фильтры и отправка заявки выбранному ментору."
+    }
+  },
+  {
+    path: "/students",
+    name: "students",
+    component: StudentsPage,
+    meta: {
+      requiresAuth: true,
+      roles: ["MENTOR"],
+      title: "Студенты",
+      description: "Каталог студентов для приглашений от менторов."
     }
   },
   {
@@ -50,6 +71,8 @@ const routes: RouteRecordRaw[] = [
     name: "requests",
     component: RequestsPage,
     meta: {
+      requiresAuth: true,
+      roles: ["STUDENT", "MENTOR"],
       title: "Заявки",
       description: "Все заявки, их статусы и действия по обработке."
     }
@@ -59,6 +82,8 @@ const routes: RouteRecordRaw[] = [
     name: "chat",
     component: ChatPage,
     meta: {
+      requiresAuth: true,
+      roles: ["STUDENT", "MENTOR"],
       title: "Чаты",
       description: "Переписка по заявкам и отправка сообщений."
     }
@@ -68,8 +93,32 @@ const routes: RouteRecordRaw[] = [
     name: "files",
     component: FilesPage,
     meta: {
+      requiresAuth: true,
+      roles: ["STUDENT", "MENTOR"],
       title: "Файлы",
       description: "Резюме, портфолио, аватар и вложения для чата."
+    }
+  },
+  {
+    path: "/reviews",
+    name: "reviews",
+    component: ReviewsPage,
+    meta: {
+      requiresAuth: true,
+      roles: ["STUDENT", "MENTOR", "ADMIN"],
+      title: "Отзывы",
+      description: "Рейтинг менторов, отзывы и модерация обратной связи."
+    }
+  },
+  {
+    path: "/admin",
+    name: "admin",
+    component: AdminPage,
+    meta: {
+      requiresAuth: true,
+      roles: ["ADMIN"],
+      title: "Администрирование",
+      description: "Пользователи, справочники, отзывы, жалобы и аудит."
     }
   }
 ];
@@ -77,4 +126,29 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes
+});
+
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore();
+  const requiresAuth = Boolean(to.meta.requiresAuth);
+  const roles = to.meta.roles as AccessRole[] | undefined;
+
+  if ((requiresAuth || roles?.length) && authStore.hasSession && !authStore.user) {
+    await authStore.fetchCurrentUser();
+  }
+
+  if (requiresAuth && !authStore.isAuthenticated) {
+    return {
+      name: "auth",
+      query: {
+        redirect: to.fullPath
+      }
+    };
+  }
+
+  if (roles?.length && !hasAnyRole(authStore.user, roles)) {
+    return { name: "home" };
+  }
+
+  return true;
 });

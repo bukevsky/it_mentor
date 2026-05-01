@@ -22,6 +22,7 @@ import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.MentoringRequestRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,7 @@ import java.util.Objects;
 
 import static com.example.it.mentor.entity.enums.MentoringRequestStatus.*;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MentoringRequestService {
@@ -101,6 +103,7 @@ public class MentoringRequestService {
                 .build();
 
         requestRepository.save(request);
+        log.info("Заявка создана: requestId={}, direction={}, studentProfileId={}, mentorProfileId={}", request.getId(), direction, studentProfile.getId(), mentorProfile.getId());
 
         return mapper.toResponse(request);
     }
@@ -147,6 +150,7 @@ public class MentoringRequestService {
         if (request.getStatus() == SENT) {
             request.setStatus(REVIEWING);
             requestRepository.save(request);
+            log.info("Заявка взята в работу: requestId={}, userId={}", requestId, currentUser.getId());
         }
         return mapper.toResponse(request);
     }
@@ -162,6 +166,7 @@ public class MentoringRequestService {
         request.setClarificationNote(dto.clarificationNote());
         request.setRespondedAt(OffsetDateTime.now());
         requestRepository.save(request);
+        log.info("Запрошено уточнение: requestId={}, userId={}", requestId, currentUser.getId());
         return mapper.toResponse(request);
     }
 
@@ -185,6 +190,7 @@ public class MentoringRequestService {
         request.setStatus(ACCEPTED);
         request.setRespondedAt(OffsetDateTime.now());
         requestRepository.save(request);
+        log.info("Заявка принята: requestId={}, userId={}", requestId, currentUser.getId());
         chatService.createForRequest(request);
         return mapper.toResponse(request);
     }
@@ -200,6 +206,7 @@ public class MentoringRequestService {
         request.setReason(dto.reason());
         request.setRespondedAt(OffsetDateTime.now());
         requestRepository.save(request);
+        log.info("Заявка отклонена: requestId={}, userId={}", requestId, currentUser.getId());
         return mapper.toResponse(request);
     }
 
@@ -215,6 +222,7 @@ public class MentoringRequestService {
 
         request.setStatus(CANCELLED);
         requestRepository.save(request);
+        log.info("Заявка отменена: requestId={}, userId={}", requestId, currentUser.getId());
         return mapper.toResponse(request);
     }
 
@@ -231,6 +239,7 @@ public class MentoringRequestService {
         request.setStatus(COMPLETED);
         request.setCompletedAt(OffsetDateTime.now());
         requestRepository.save(request);
+        log.info("Менторинг завершён: requestId={}, userId={}", requestId, currentUser.getId());
         return mapper.toResponse(request);
     }
 
