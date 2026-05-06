@@ -9,6 +9,9 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 
+/**
+ * SMTP-реализация {@link EmailService} для отправки писем через {@link JavaMailSender}.
+ */
 @Slf4j
 @Service
 @Primary
@@ -21,6 +24,12 @@ public class SmtpEmailService implements EmailService {
     @Value("${spring.mail.username}")
     private String from;
 
+    /**
+     * Отправляет пользователю письмо с OTP-кодом для сброса пароля.
+     *
+     * @param toEmail адрес получателя
+     * @param otpCode одноразовый код сброса пароля
+     */
     @Override
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
         SimpleMailMessage msg = new SimpleMailMessage();

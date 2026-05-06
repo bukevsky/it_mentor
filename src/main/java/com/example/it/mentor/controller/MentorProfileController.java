@@ -71,6 +71,17 @@ public class MentorProfileController {
 
     /**
      * Поиск менторов с фильтрацией и пагинацией.
+     *
+     * @param q текстовый поиск по профилю
+     * @param skillIds список идентификаторов навыков
+     * @param cityId идентификатор города
+     * @param recruitmentStatus статус набора ментора
+     * @param mentoringType тип менторства
+     * @param mentoringChannel канал взаимодействия
+     * @param page номер страницы, начиная с {@code 0}
+     * @param size размер страницы
+     * @param sort поле и направление сортировки в формате {@code field,direction}
+     * @return страница менторов, соответствующих фильтру
      */
     @GetMapping("/profiles/mentors")
     public PagedResponse<MentorCardResponse> search(
@@ -87,6 +98,14 @@ public class MentorProfileController {
         return mentorProfileService.searchMentors(filter, buildPageable(page, size, sort));
     }
 
+    /**
+     * Собирает объект пагинации с белым списком полей сортировки.
+     *
+     * @param page номер страницы
+     * @param size размер страницы
+     * @param sort строка сортировки в формате {@code field,direction}
+     * @return безопасный {@link Pageable} для поиска
+     */
     private Pageable buildPageable(int page, int size, String sort) {
         String[] parts = sort.split(",", 2);
         String field = SORT_WHITELIST.contains(parts[0]) ? parts[0] : "createdAt";

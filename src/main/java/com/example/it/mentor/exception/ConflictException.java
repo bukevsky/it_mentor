@@ -7,6 +7,9 @@ import org.springframework.http.HttpStatus;
  */
 public class ConflictException extends ApiException {
 
+    /**
+     * @param message описание конфликта данных
+     */
     public ConflictException(String message) {
         super(message, HttpStatus.CONFLICT);
     }

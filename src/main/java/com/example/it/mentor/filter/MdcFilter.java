@@ -1,4 +1,4 @@
-package com.example.it.mentor.config;
+package com.example.it.mentor.filter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -22,8 +22,18 @@ import java.util.UUID;
 public class MdcFilter extends OncePerRequestFilter {
 
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
-    private static final String MDC_KEY = "requestId";
+    private static final String REQUEST_ID_MDC_KEY = "requestId";
+    private static final String USER_ID_MDC_KEY = "userId";
 
+    /**
+     * Инициализирует MDC для текущего HTTP-запроса и прокидывает requestId в ответ.
+     *
+     * @param request входящий HTTP-запрос
+     * @param response HTTP-ответ
+     * @param filterChain цепочка фильтров
+     * @throws ServletException если следующий фильтр завершился ошибкой сервлета
+     * @throws IOException если произошла ошибка ввода-вывода
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
@@ -33,12 +43,14 @@ public class MdcFilter extends OncePerRequestFilter {
             requestId = UUID.randomUUID().toString().substring(0, 8);
         }
 
-        MDC.put(MDC_KEY, requestId);
+        MDC.remove(USER_ID_MDC_KEY);
+        MDC.put(REQUEST_ID_MDC_KEY, requestId);
         response.setHeader(REQUEST_ID_HEADER, requestId);
         try {
             filterChain.doFilter(request, response);
         } finally {
-            MDC.remove(MDC_KEY);
+            MDC.remove(REQUEST_ID_MDC_KEY);
+            MDC.remove(USER_ID_MDC_KEY);
         }
     }
 }

@@ -11,26 +11,80 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * Репозиторий заявок на менторство.
+ */
 @Repository
 public interface MentoringRequestRepository extends JpaRepository<MentoringRequest, Long> {
 
+    /**
+     * Проверяет наличие активной заявки между конкретным студентом и ментором.
+     *
+     * @param studentId идентификатор профиля студента
+     * @param mentorId идентификатор профиля ментора
+     * @param activeStatuses набор статусов, считающихся активными
+     * @return {@code true}, если активная заявка уже существует
+     */
     boolean existsByStudentProfileIdAndMentorProfileIdAndStatusIn(
             Long studentId, Long mentorId, List<MentoringRequestStatus> activeStatuses);
 
+    /**
+     * Возвращает страницу заявок конкретного ментора с предзагрузкой профилей.
+     *
+     * @param id идентификатор профиля ментора
+     * @param p параметры пагинации
+     * @return страница заявок
+     */
     @EntityGraph(value = "MentoringRequest.withProfiles")
     Page<MentoringRequest> findByMentorProfileId(Long id, Pageable p);
 
+    /**
+     * Возвращает страницу заявок ментора, отфильтрованных по статусу.
+     *
+     * @param id идентификатор профиля ментора
+     * @param s статус заявки
+     * @param p параметры пагинации
+     * @return страница заявок
+     */
     @EntityGraph(value = "MentoringRequest.withProfiles")
     Page<MentoringRequest> findByMentorProfileIdAndStatus(Long id, MentoringRequestStatus s, Pageable p);
 
+    /**
+     * Возвращает страницу заявок конкретного студента с предзагрузкой профилей.
+     *
+     * @param id идентификатор профиля студента
+     * @param p параметры пагинации
+     * @return страница заявок
+     */
     @EntityGraph(value = "MentoringRequest.withProfiles")
     Page<MentoringRequest> findByStudentProfileId(Long id, Pageable p);
 
+    /**
+     * Возвращает страницу заявок студента, отфильтрованных по статусу.
+     *
+     * @param id идентификатор профиля студента
+     * @param s статус заявки
+     * @param p параметры пагинации
+     * @return страница заявок
+     */
     @EntityGraph(value = "MentoringRequest.withProfiles")
     Page<MentoringRequest> findByStudentProfileIdAndStatus(Long id, MentoringRequestStatus s, Pageable p);
 
+    /**
+     * Считает количество заявок ментора в конкретном статусе.
+     *
+     * @param mentorId идентификатор профиля ментора
+     * @param status статус заявки
+     * @return количество заявок
+     */
     long countByMentorProfileIdAndStatus(Long mentorId, MentoringRequestStatus status);
 
-    @EntityGraph(value = "MentoringRequest.withProfiles")
+    /**
+     * Загружает заявку вместе с профилями и пользователями обеих сторон.
+     *
+     * @param id идентификатор заявки
+     * @return найденная заявка
+     */
+    @EntityGraph(value = "MentoringRequest.withProfilesAndUsers")
     Optional<MentoringRequest> findWithProfilesById(Long id);
 }

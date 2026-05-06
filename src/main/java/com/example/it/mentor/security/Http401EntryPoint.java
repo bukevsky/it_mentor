@@ -24,6 +24,14 @@ public class Http401EntryPoint implements AuthenticationEntryPoint {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * Формирует JSON-ответ для неаутентифицированного доступа к защищённому ресурсу.
+     *
+     * @param request исходный HTTP-запрос
+     * @param response HTTP-ответ
+     * @param authException причина отказа в аутентификации
+     * @throws IOException если не удалось записать тело ответа
+     */
     @Override
     public void commence(HttpServletRequest request,
                          HttpServletResponse response,

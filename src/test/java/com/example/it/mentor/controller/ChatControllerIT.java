@@ -349,7 +349,7 @@ class ChatControllerIT {
     }
 
     private void grantMentorRole(String email) {
-        User user = userRepository.findByEmailAndDeletedFalse(email).orElseThrow();
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
         Role mentorRole = roleRepository.findByCode(RoleCode.MENTOR).orElseThrow();
         user.getRoles().clear();
         user.getRoles().add(mentorRole);

@@ -185,6 +185,22 @@ class MentorProfileControllerIT {
         }
 
         @Test
+        @DisplayName("слишком длинный mentoringFrequency → 400")
+        void tooLongMentoringFrequency_shouldReturn400() {
+            String token = registerAndLogin();
+            MentorProfileRequest request = new MentorProfileRequest(
+                    "Иван", "Иванов", null, null, null,
+                    null, null, null, null, null, null,
+                    null, null, "раз в неделю ".repeat(10), null, null, null, null);
+
+            ResponseEntity<Object> response = restTemplate.exchange(
+                    "/profile/mentor", HttpMethod.PUT,
+                    bearerRequest(request, token), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
         @DisplayName("несуществующий cityId → 404")
         void nonExistentCity_shouldReturn404() {
             String token = registerAndLogin();

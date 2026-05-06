@@ -24,6 +24,9 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Реализация {@link FileStorage}, сохраняющая файлы в MinIO и метаданные в БД.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -42,10 +45,18 @@ public class FileStorageService implements FileStorage {
     private static final byte[] WEBP_RIFF   = {0x52, 0x49, 0x46, 0x46}; // "RIFF"
     private static final byte[] WEBP_MARKER = {0x57, 0x45, 0x42, 0x50}; // "WEBP"
 
+    /**
+     * Валидирует и сохраняет файл в объектное хранилище.
+     *
+     * @param file загружаемый файл
+     * @param type тип файла с правилами валидации
+     * @param ownerId идентификатор владельца файла
+     * @return метаданные сохранённого файла
+     */
     @Override
     @Transactional
     public FileUploadResponse store(MultipartFile file, FileType type, Long ownerId) {
-        type.validate(file);
+        type.validate(file.getContentType(), file.getSize());
         validateFileSignature(file, type);
 
         String rawName = file.getOriginalFilename();
@@ -88,6 +99,12 @@ public class FileStorageService implements FileStorage {
         );
     }
 
+    /**
+     * Удаляет файл из MinIO и из таблицы метаданных после проверки владельца.
+     *
+     * @param fileId идентификатор файла
+     * @param requesterId идентификатор пользователя, запросившего удаление
+     */
     @Override
     @Transactional
     public void delete(Long fileId, Long requesterId) {
@@ -113,6 +130,12 @@ public class FileStorageService implements FileStorage {
         log.info("Файл удалён: fileId={}, storageKey={}, requesterId={}", fileId, file.getStorageKey(), requesterId);
     }
 
+    /**
+     * Проверяет, что файл принадлежит ожидаемому пользователю.
+     *
+     * @param fileId идентификатор файла
+     * @param ownerId идентификатор ожидаемого владельца
+     */
     @Override
     public void requireOwned(Long fileId, Long ownerId) {
         StoredFile file = storedFileRepository.findById(fileId)
@@ -153,12 +176,24 @@ public class FileStorageService implements FileStorage {
         }
     }
 
+    /**
+     * Проверяет, что заголовок файла соответствует формату WEBP.
+     *
+     * @param header первые байты файла
+     * @return {@code true}, если сигнатура соответствует WEBP
+     */
     private static boolean isWebp(byte[] header) {
         return header.length >= 12
                 && Arrays.mismatch(header, 0, 4, WEBP_RIFF, 0, 4) == -1
                 && Arrays.mismatch(header, 8, 12, WEBP_MARKER, 0, 4) == -1;
     }
 
+    /**
+     * Извлекает расширение файла из исходного имени.
+     *
+     * @param filename исходное имя файла
+     * @return расширение с точкой или пустая строка
+     */
     private String extractExtension(String filename) {
         if (filename == null || !filename.contains(".")) {
             return "";

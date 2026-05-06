@@ -24,6 +24,14 @@ public class Http403AccessDeniedHandler implements AccessDeniedHandler {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * Формирует JSON-ответ для аутентифицированного пользователя без нужных прав.
+     *
+     * @param request исходный HTTP-запрос
+     * @param response HTTP-ответ
+     * @param accessDeniedException причина отказа в доступе
+     * @throws IOException если не удалось записать тело ответа
+     */
     @Override
     public void handle(HttpServletRequest request,
                        HttpServletResponse response,
