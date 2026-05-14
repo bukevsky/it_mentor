@@ -35,6 +35,7 @@ public class DashboardService {
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
     private final StudentProfileService studentProfileService;
+    private final MentoringSessionService mentoringSessionService;
 
     public DashboardSummaryResponse getSummary() {
         User user = userService.getCurrentUserEntity();
@@ -76,7 +77,8 @@ public class DashboardService {
 
         return new DashboardSummaryResponse(
                 role, sentRequests, pendingRequests, acceptedRequests,
-                totalChats, unreadChats, profileCompletion, null);
+                totalChats, unreadChats, profileCompletion,
+                mentoringSessionService.findNextForCurrentUser().orElse(null));
     }
 
     public List<ActivityItemResponse> getActivity(int limit) {
