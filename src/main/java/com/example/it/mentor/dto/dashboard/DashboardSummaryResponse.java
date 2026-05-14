@@ -1,5 +1,7 @@
 package com.example.it.mentor.dto.dashboard;
 
+import com.example.it.mentor.dto.session.NextSessionSummary;
+
 public record DashboardSummaryResponse(
         String role,
         int sentRequests,
@@ -8,5 +10,5 @@ public record DashboardSummaryResponse(
         int totalChats,
         int unreadChats,
         int profileCompletion,
-        Object nextSession
+        NextSessionSummary nextSession
 ) {}
