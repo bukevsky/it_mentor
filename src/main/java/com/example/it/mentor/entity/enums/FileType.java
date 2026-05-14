@@ -15,7 +15,7 @@ public enum FileType {
             10L * 1024 * 1024,
             "Портфолио должно быть PDF, JPEG или PNG",
             "Размер файла не должен превышать 10 МБ"),
-    ATTACHMENT("Вложение",
+    CHAT_ATTACHMENT("Вложение",
             Set.of(
                     "image/jpeg", "image/png", "image/gif", "image/webp",
                     "application/pdf", "text/plain",

@@ -17,8 +17,11 @@ import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.ChatMapper;
 import com.example.it.mentor.repository.ChatMessageRepository;
+import com.example.it.mentor.repository.ChatReadStateRepository;
 import com.example.it.mentor.repository.ChatRepository;
+import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.StoredFileRepository;
+import com.example.it.mentor.repository.StudentProfileRepository;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -31,10 +34,12 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,10 +50,14 @@ class ChatServiceTest {
 
     @Mock private ChatRepository chatRepository;
     @Mock private ChatMessageRepository messageRepository;
+    @Mock private ChatReadStateRepository readStateRepository;
+    @Mock private StudentProfileRepository studentProfileRepository;
+    @Mock private MentorProfileRepository mentorProfileRepository;
     @Mock private UserService userService;
     @Mock private FileStorage fileStorage;
     @Mock private StoredFileRepository storedFileRepository;
     @Mock private ChatMapper mapper;
+    @Mock private ChatSseService sseService;
 
     private User studentUser;
     private User mentorUser;
@@ -127,12 +136,17 @@ class ChatServiceTest {
         void getById_participant_shouldReturnResponse() {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
             when(chatRepository.findWithMentoringRequestById(200L)).thenReturn(Optional.of(chat));
-            ChatResponse expected = new ChatResponse(200L, 100L, 1L, 2L, null);
-            when(mapper.toResponse(chat)).thenReturn(expected);
+            when(messageRepository.findFirstByChatIdAndDeletedFalseOrderByCreatedAtDesc(200L))
+                    .thenReturn(Optional.empty());
+            when(readStateRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
+            when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+            when(mentorProfileRepository.findByUserId(2L)).thenReturn(Optional.empty());
 
             ChatResponse result = service.getById(200L);
 
-            assertThat(result).isEqualTo(expected);
+            assertThat(result.id()).isEqualTo(200L);
+            assertThat(result.studentUserId()).isEqualTo(1L);
+            assertThat(result.mentorUserId()).isEqualTo(2L);
         }
 
         @Test
@@ -169,12 +183,15 @@ class ChatServiceTest {
         void getByRequestId_happyPath_shouldReturnResponse() {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
             when(chatRepository.findByMentoringRequestId(100L)).thenReturn(Optional.of(chat));
-            ChatResponse expected = new ChatResponse(200L, 100L, 1L, 2L, null);
-            when(mapper.toResponse(chat)).thenReturn(expected);
+            when(messageRepository.findFirstByChatIdAndDeletedFalseOrderByCreatedAtDesc(200L))
+                    .thenReturn(Optional.empty());
+            when(readStateRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
+            when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+            when(mentorProfileRepository.findByUserId(2L)).thenReturn(Optional.empty());
 
             ChatResponse result = service.getByRequestId(100L);
 
-            assertThat(result).isEqualTo(expected);
+            assertThat(result.id()).isEqualTo(200L);
         }
 
         @Test
@@ -200,8 +217,10 @@ class ChatServiceTest {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
             Page<Chat> page = new PageImpl<>(List.of(chat));
             when(chatRepository.findAllByUserId(eq(1L), any())).thenReturn(page);
-            ChatResponse resp = new ChatResponse(200L, 100L, 1L, 2L, null);
-            when(mapper.toResponse(chat)).thenReturn(resp);
+            when(readStateRepository.countUnreadPerChat(1L)).thenReturn(Map.of());
+            when(studentProfileRepository.findAllByUserIdIn(any())).thenReturn(List.of());
+            when(mentorProfileRepository.findAllByUserIdIn(any())).thenReturn(List.of());
+            when(messageRepository.findLastMessagesByChatIds(any())).thenReturn(List.of());
 
             PagedResponse<ChatResponse> result = service.getMyChats(PageRequest.of(0, 20));
 

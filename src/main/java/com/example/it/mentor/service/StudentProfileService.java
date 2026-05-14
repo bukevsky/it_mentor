@@ -1,9 +1,15 @@
 package com.example.it.mentor.service;
 
+import com.example.it.mentor.dto.PagedResponse;
+import com.example.it.mentor.dto.student.StudentCompletionResponse;
 import com.example.it.mentor.dto.student.StudentEducationRequest;
 import com.example.it.mentor.dto.student.StudentLanguageRequest;
+import com.example.it.mentor.dto.student.PatchStudentProfileRequest;
+import com.example.it.mentor.dto.student.PutStudentLanguagesRequest;
+import com.example.it.mentor.dto.student.PutStudentSkillsRequest;
 import com.example.it.mentor.dto.student.StudentProfileRequest;
 import com.example.it.mentor.dto.student.StudentProfileResponse;
+import com.example.it.mentor.dto.student.StudentSearchFilter;
 import com.example.it.mentor.dto.student.StudentSkillRequest;
 import com.example.it.mentor.entity.BaseEntity;
 import com.example.it.mentor.entity.StudentEducation;
@@ -22,9 +28,13 @@ import com.example.it.mentor.repository.DictSkillRepository;
 import com.example.it.mentor.repository.StudentEducationRepository;
 import com.example.it.mentor.repository.StudentLanguageRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
+import com.example.it.mentor.repository.StudentProfileSpecification;
 import com.example.it.mentor.repository.StudentSkillRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -132,6 +142,132 @@ public class StudentProfileService {
         StudentProfile profile = profileRepository.findWithDetailsById(id)
                 .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
         return mapper.toResponse(profile);
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<StudentProfileResponse> searchStudents(StudentSearchFilter filter, Pageable pageable) {
+        Specification<StudentProfile> spec = StudentProfileSpecification.build(filter);
+        Page<StudentProfile> page = profileRepository.findAll(spec, pageable);
+        return PagedResponse.from(page.map(mapper::toResponse));
+    }
+
+    @Transactional
+    public StudentProfileResponse patchProfile(PatchStudentProfileRequest request) {
+        User user = userService.getCurrentUserEntity();
+        StudentProfile profile = profileRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
+
+        if (request.firstName() != null) profile.setFirstName(request.firstName());
+        if (request.lastName() != null) profile.setLastName(request.lastName());
+        if (request.middleName() != null) profile.setMiddleName(request.middleName());
+        if (request.phone() != null) profile.setPhone(request.phone());
+        if (request.desiredPosition() != null) profile.setDesiredPosition(request.desiredPosition());
+        if (request.hoursPerWeek() != null) profile.setHoursPerWeek(request.hoursPerWeek());
+        if (request.availableFrom() != null) profile.setAvailableFrom(request.availableFrom());
+        if (request.about() != null) profile.setAbout(request.about());
+        if (request.maxContact() != null) profile.setMaxContact(request.maxContact());
+        if (request.cityId() != null) {
+            if (request.cityId() == 0L) {
+                profile.setCity(null);
+            } else {
+                profile.setCity(resolveCity(request.cityId()));
+            }
+        }
+        if (request.employmentTypes() != null) replaceValues(profile.getEmploymentTypes(), request.employmentTypes());
+        if (request.workFormats() != null) replaceValues(profile.getWorkFormats(), request.workFormats());
+
+        profileRepository.save(profile);
+        log.info("Профиль студента обновлён (PATCH): userId={}", user.getId());
+        return loadResponse(profile.getId());
+    }
+
+    @Transactional(readOnly = true)
+    public StudentCompletionResponse getCompletion() {
+        User user = userService.getCurrentUserEntity();
+        StudentProfile profile = profileRepository.findWithDetailsByUserId(user.getId())
+                .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
+
+        boolean mainDone = profile.getFirstName() != null && !profile.getFirstName().isBlank()
+                && profile.getLastName() != null && !profile.getLastName().isBlank()
+                && profile.getCity() != null
+                && profile.getDesiredPosition() != null && !profile.getDesiredPosition().isBlank();
+        boolean aboutDone = profile.getAbout() != null && !profile.getAbout().isBlank();
+        boolean skillsDone = profile.getSkills() != null && profile.getSkills().size() >= 3;
+        boolean resumeDone = profile.getResumeFileId() != null;
+
+        int filledCount = (mainDone ? 1 : 0) + (aboutDone ? 1 : 0)
+                + (skillsDone ? 1 : 0) + (resumeDone ? 1 : 0);
+        int percent = filledCount * 25;
+
+        return new StudentCompletionResponse(percent, mainDone, aboutDone, skillsDone, resumeDone);
+    }
+
+    @Transactional
+    public StudentProfileResponse replaceStudentSkills(PutStudentSkillsRequest request) {
+        User user = userService.getCurrentUserEntity();
+        StudentProfile profile = profileRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
+
+        List<Long> skillIds = request.skills().stream()
+                .map(r -> r.skillId())
+                .toList();
+        Map<Long, DictSkill> skillMap = skillRefRepository.findAllById(skillIds).stream()
+                .collect(Collectors.toMap(BaseEntity::getId, Function.identity()));
+
+        skillRepository.deleteAllByStudentProfile(profile);
+        profile.getSkills().clear();
+
+        Set<StudentSkill> newSkills = request.skills().stream()
+                .map(req -> {
+                    DictSkill skill = skillMap.get(req.skillId());
+                    if (skill == null) throw new NotFoundException("Навык не найден: " + req.skillId());
+                    return StudentSkill.builder()
+                            .studentProfile(profile)
+                            .skill(skill)
+                            .level(req.level())
+                            .position(req.position())
+                            .build();
+                })
+                .collect(Collectors.toSet());
+        profile.getSkills().addAll(newSkills);
+        profileRepository.save(profile);
+
+        log.info("Навыки студента заменены: userId={}", user.getId());
+        return loadResponse(profile.getId());
+    }
+
+    @Transactional
+    public StudentProfileResponse replaceStudentLanguages(PutStudentLanguagesRequest request) {
+        User user = userService.getCurrentUserEntity();
+        StudentProfile profile = profileRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new NotFoundException("Профиль студента не найден"));
+
+        List<Long> langIds = request.languages().stream()
+                .map(r -> r.languageId())
+                .toList();
+        Map<Long, DictLanguage> langMap = languageRefRepository.findAllById(langIds).stream()
+                .collect(Collectors.toMap(BaseEntity::getId, Function.identity()));
+
+        languageRepository.deleteAllByStudentProfile(profile);
+        profile.getLanguages().clear();
+
+        Set<StudentLanguage> newLanguages = request.languages().stream()
+                .map(req -> {
+                    DictLanguage lang = langMap.get(req.languageId());
+                    if (lang == null) throw new NotFoundException("Язык не найден: " + req.languageId());
+                    return StudentLanguage.builder()
+                            .studentProfile(profile)
+                            .language(lang)
+                            .level(req.level())
+                            .position(req.position())
+                            .build();
+                })
+                .collect(Collectors.toSet());
+        profile.getLanguages().addAll(newLanguages);
+        profileRepository.save(profile);
+
+        log.info("Языки студента заменены: userId={}", user.getId());
+        return loadResponse(profile.getId());
     }
 
     /**

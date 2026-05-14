@@ -87,4 +87,14 @@ public interface MentoringRequestRepository extends JpaRepository<MentoringReque
      */
     @EntityGraph(value = "MentoringRequest.withProfilesAndUsers")
     Optional<MentoringRequest> findWithProfilesById(Long id);
+
+    long countByStudentProfileIdAndStatus(Long studentId, MentoringRequestStatus status);
+
+    long countByMentorProfileIdAndStatusIn(Long mentorId, List<MentoringRequestStatus> statuses);
+
+    long countByStudentProfileIdAndStatusIn(Long studentId, List<MentoringRequestStatus> statuses);
+
+    Page<MentoringRequest> findTop20ByStudentProfileIdOrderByCreatedAtDesc(Long studentId, Pageable pageable);
+
+    Page<MentoringRequest> findTop20ByMentorProfileIdOrderByCreatedAtDesc(Long mentorId, Pageable pageable);
 }

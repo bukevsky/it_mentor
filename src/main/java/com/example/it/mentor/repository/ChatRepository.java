@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -53,4 +54,12 @@ public interface ChatRepository extends JpaRepository<Chat, Long> {
     @EntityGraph(attributePaths = "mentoringRequest")
     @Query("SELECT c FROM Chat c WHERE c.studentUserId = :userId OR c.mentorUserId = :userId")
     Page<Chat> findAllByUserId(@Param("userId") Long userId, Pageable pageable);
+
+    @Query("SELECT COUNT(c) FROM Chat c WHERE c.studentUserId = :userId OR c.mentorUserId = :userId")
+    long countByUserId(@Param("userId") Long userId);
+
+    @Query("SELECT CASE WHEN c.studentUserId = :userId THEN c.mentorUserId " +
+           "ELSE c.studentUserId END FROM Chat c " +
+           "WHERE c.studentUserId = :userId OR c.mentorUserId = :userId")
+    List<Long> findAllChatPartnerIds(@Param("userId") Long userId);
 }

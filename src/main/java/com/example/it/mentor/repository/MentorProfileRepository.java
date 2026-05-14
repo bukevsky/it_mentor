@@ -49,4 +49,7 @@ public interface MentorProfileRepository extends JpaRepository<MentorProfile, Lo
      */
     @EntityGraph(attributePaths = {"city", "skills", "skills.skill"})
     List<MentorProfile> findAllWithDetailsByIdIn(List<Long> ids);
+
+    @EntityGraph(attributePaths = {"user"})
+    List<MentorProfile> findAllByUserIdIn(java.util.Collection<Long> userIds);
 }

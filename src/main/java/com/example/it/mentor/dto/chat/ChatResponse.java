@@ -7,5 +7,12 @@ public record ChatResponse(
         Long mentoringRequestId,
         Long studentUserId,
         Long mentorUserId,
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+        ChatMessageResponse lastMessage,
+        OffsetDateTime lastMessageAt,
+        Long lastSenderUserId,
+        int unreadCount,
+        String studentName,
+        String mentorName,
+        String mentoringRequestStatus
 ) {}

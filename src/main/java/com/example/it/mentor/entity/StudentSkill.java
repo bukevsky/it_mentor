@@ -25,4 +25,8 @@ public class StudentSkill extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false)
     private SkillLevel level;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private int position = 0;
 }

@@ -181,7 +181,7 @@ class EnumLabelTest {
         void labels_matchSpec() {
             assertThat(FileType.RESUME.getLabel()).isEqualTo("Резюме");
             assertThat(FileType.PORTFOLIO.getLabel()).isEqualTo("Портфолио");
-            assertThat(FileType.ATTACHMENT.getLabel()).isEqualTo("Вложение");
+            assertThat(FileType.CHAT_ATTACHMENT.getLabel()).isEqualTo("Вложение");
         }
     }
 
