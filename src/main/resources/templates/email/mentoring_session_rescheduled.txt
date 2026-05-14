@@ -1,0 +1,8 @@
+[(${recipientName})], здравствуйте!
+
+Сессия менторинга перенесена.
+  Новая дата и время: [(${scheduledAt})]
+  Продолжительность: [(${durationMinutes})] мин.
+[# th:if="${reason != null and !#strings.isEmpty(reason)}"]  Причина: [(${reason})]
+[/]
+Открыть сессию: [(${actionUrl})]

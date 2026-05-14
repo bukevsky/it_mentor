@@ -12,12 +12,14 @@ import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.event.review.ReviewCreatedEvent;
 import com.example.it.mentor.mapper.ReviewMapper;
 import com.example.it.mentor.repository.MentoringRequestRepository;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.ReviewRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,7 @@ public class ReviewService {
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
     private final ReviewMapper mapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Создаёт отзыв по завершённой заявке.
@@ -77,6 +80,7 @@ public class ReviewService {
         review = reviewRepository.save(review);
         log.info("Отзыв создан: reviewId={}, requestId={}, reviewerUserId={}, mentorUserId={}, rating={}",
                 review.getId(), request.getId(), currentUser.getId(), mentorUserId, dto.rating());
+        eventPublisher.publishEvent(new ReviewCreatedEvent(review.getId(), mentorUserId));
         return mapper.toResponse(review);
     }
 

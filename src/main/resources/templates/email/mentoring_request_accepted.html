@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>Ваша заявка на менторство принята ментором <strong th:text="${mentorName}">Ментор</strong>.</p>
+  <p>Вы можете начать общение в чате заявки.</p>
+  <a th:href="${actionUrl}" class="btn">Перейти в чат</a>
+</div>
+</body>
+</html>

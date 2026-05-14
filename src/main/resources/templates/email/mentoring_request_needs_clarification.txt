@@ -1,0 +1,6 @@
+[(${recipientName})], здравствуйте!
+
+По вашей заявке запрошено уточнение.
+[# th:if="${clarificationNote != null and !#strings.isEmpty(clarificationNote)}"][(${clarificationNote})]
+[/]
+Ответьте на заявку: [(${actionUrl})]

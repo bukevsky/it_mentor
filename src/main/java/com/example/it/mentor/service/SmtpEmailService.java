@@ -2,11 +2,13 @@ package com.example.it.mentor.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 /**
@@ -44,5 +46,22 @@ public class SmtpEmailService implements EmailService {
                 """.formatted(otpCode));
         mailSender.send(msg);
         log.info("OTP-код отправлен на: {}", toEmail);
+    }
+
+    @Override
+    public void send(EmailMessage message) {
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
+            helper.setFrom(from);
+            helper.setTo(message.to());
+            helper.setSubject(message.subject());
+            helper.setText(message.textBody(), message.htmlBody());
+            mailSender.send(mime);
+            log.info("Письмо отправлено: to={}, subject={}", message.to(), message.subject());
+        } catch (Exception e) {
+            log.error("Ошибка отправки письма: to={}, subject={}, error={}", message.to(), message.subject(), e.getMessage());
+            throw new RuntimeException("Ошибка отправки письма: " + e.getMessage(), e);
+        }
     }
 }

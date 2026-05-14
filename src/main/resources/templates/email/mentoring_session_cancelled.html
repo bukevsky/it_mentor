@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>Сессия менторинга отменена.</p>
+  <p th:if="${reason != null and !#strings.isEmpty(reason)}">
+    Причина: <em th:text="${reason}"></em>
+  </p>
+  <a th:href="${actionUrl}" class="btn">Открыть личный кабинет</a>
+</div>
+</body>
+</html>

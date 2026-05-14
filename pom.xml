@@ -177,6 +177,12 @@
 			<artifactId>spring-boot-starter-mail</artifactId>
 		</dependency>
 
+		<!-- Thymeleaf для HTML-шаблонов писем -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-thymeleaf</artifactId>
+		</dependency>
+
 		<!-- MinIO SDK -->
 		<dependency>
 			<groupId>io.minio</groupId>

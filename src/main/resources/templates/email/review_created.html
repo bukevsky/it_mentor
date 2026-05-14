@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>Студент <strong th:text="${reviewerName}">Студент</strong> оставил отзыв о работе с вами.</p>
+  <p>Оценка: <strong th:text="${rating}">5</strong> / 5</p>
+  <p th:if="${comment != null and !#strings.isEmpty(comment)}">
+    <em th:text="${comment}"></em>
+  </p>
+  <a th:href="${actionUrl}" class="btn">Посмотреть отзывы</a>
+</div>
+</body>
+</html>

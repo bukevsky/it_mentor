@@ -12,4 +12,11 @@ public interface EmailService {
      * @param otpCode одноразовый код подтверждения
      */
     void sendPasswordResetOtp(String toEmail, String otpCode);
+
+    /**
+     * Отправляет произвольное HTML/text письмо.
+     *
+     * @param message данные письма
+     */
+    void send(EmailMessage message);
 }

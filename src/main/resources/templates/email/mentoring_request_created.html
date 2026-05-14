@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>К вам поступила новая заявка на менторство от <strong th:text="${senderName}">Студент</strong>.</p>
+  <p th:if="${message != null and !#strings.isEmpty(message)}">
+    <em>Сообщение: <span th:text="${message}"></span></em>
+  </p>
+  <p>Перейдите в личный кабинет, чтобы рассмотреть заявку.</p>
+  <a th:href="${actionUrl}" class="btn">Открыть заявку</a>
+</div>
+</body>
+</html>

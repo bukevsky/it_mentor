@@ -26,6 +26,15 @@ app:
     bucket-name: itmentor-test
   cors:
     allowed-origins: http://localhost:3000
+  notifications:
+    enabled: false
+    from-name: "IT Mentor Test"
+    base-url: http://localhost:5173
+    timezone: Europe/Moscow
+    outbox:
+      max-attempts: 5
+      retry-delay-seconds: 60
+      scan-cron: "0 */1 * * * *"
 
 logging:
   structured:

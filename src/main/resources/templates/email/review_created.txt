@@ -1,0 +1,7 @@
+[(${recipientName})], здравствуйте!
+
+Студент [(${reviewerName})] оставил отзыв о работе с вами.
+Оценка: [(${rating})] / 5
+[# th:if="${comment != null and !#strings.isEmpty(comment)}"][(${comment})]
+[/]
+Посмотреть отзывы: [(${actionUrl})]
