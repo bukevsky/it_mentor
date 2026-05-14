@@ -3,15 +3,18 @@ package com.example.it.mentor.repository;
 import com.example.it.mentor.entity.StudentProfile;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
  * Репозиторий профилей студентов.
  */
 @Repository
-public interface StudentProfileRepository extends JpaRepository<StudentProfile, Long> {
+public interface StudentProfileRepository extends JpaRepository<StudentProfile, Long>, JpaSpecificationExecutor<StudentProfile> {
 
     /**
      * Ищет профиль студента по идентификатору пользователя.
@@ -46,4 +49,7 @@ public interface StudentProfileRepository extends JpaRepository<StudentProfile, 
      */
     @EntityGraph("StudentProfile.withDetails")
     Optional<StudentProfile> findWithDetailsById(Long id);
+
+    @EntityGraph(attributePaths = {"user"})
+    List<StudentProfile> findAllByUserIdIn(Collection<Long> userIds);
 }

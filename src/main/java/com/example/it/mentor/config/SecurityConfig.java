@@ -74,6 +74,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers(org.springframework.http.HttpMethod.GET, "/profiles/students")
+                            .hasAnyRole("MENTOR", "ADMIN")
+                        .requestMatchers("/mentor-stats/**").hasRole("MENTOR")
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(http401EntryPoint)

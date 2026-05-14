@@ -13,6 +13,11 @@ import org.mapstruct.Mapping;
 public interface ChatMapper {
 
     @Mapping(target = "mentoringRequestId", source = "mentoringRequest.id")
+    @Mapping(target = "mentoringRequestStatus", source = "mentoringRequest.status")
+    @Mapping(target = "lastMessage", ignore = true)
+    @Mapping(target = "unreadCount", constant = "0")
+    @Mapping(target = "studentName", ignore = true)
+    @Mapping(target = "mentorName", ignore = true)
     ChatResponse toResponse(Chat chat);
 
     @Mapping(target = "chatId", source = "chat.id")
