@@ -15,11 +15,13 @@ import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.event.session.*;
 import com.example.it.mentor.mapper.MentoringSessionMapper;
 import com.example.it.mentor.repository.MentoringRequestRepository;
 import com.example.it.mentor.repository.MentoringSessionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -55,6 +57,7 @@ public class MentoringSessionService {
     private final MentoringRequestRepository requestRepository;
     private final UserService userService;
     private final MentoringSessionMapper mapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Создаёт новую сессию менторинга для принятой заявки.
@@ -90,6 +93,8 @@ public class MentoringSessionService {
         session = sessionRepository.save(session);
         log.info("Сессия создана: sessionId={}, requestId={}, userId={}, scheduledAt={}",
                 session.getId(), request.getId(), currentUser.getId(), session.getScheduledAt());
+        eventPublisher.publishEvent(new MentoringSessionCreatedEvent(session.getId(), studentUserId));
+        eventPublisher.publishEvent(new MentoringSessionCreatedEvent(session.getId(), mentorUserId));
         return mapper.toResponse(session);
     }
 
@@ -117,6 +122,10 @@ public class MentoringSessionService {
         sessionRepository.save(session);
         log.info("Сессия перенесена: sessionId={}, userId={}, scheduledAt={}",
                 session.getId(), currentUser.getId(), session.getScheduledAt());
+        Long otherUserId = currentUser.getId().equals(session.getStudentUser().getId())
+                ? session.getMentorUser().getId()
+                : session.getStudentUser().getId();
+        eventPublisher.publishEvent(new MentoringSessionRescheduledEvent(session.getId(), otherUserId));
         return mapper.toResponse(session);
     }
 
@@ -138,6 +147,10 @@ public class MentoringSessionService {
         session.setCancelReason(dto != null ? dto.reason() : null);
         sessionRepository.save(session);
         log.info("Сессия отменена: sessionId={}, userId={}", session.getId(), currentUser.getId());
+        Long otherUserId = currentUser.getId().equals(session.getStudentUser().getId())
+                ? session.getMentorUser().getId()
+                : session.getStudentUser().getId();
+        eventPublisher.publishEvent(new MentoringSessionCancelledEvent(session.getId(), otherUserId));
         return mapper.toResponse(session);
     }
 

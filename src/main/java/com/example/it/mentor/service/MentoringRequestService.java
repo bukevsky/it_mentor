@@ -17,12 +17,14 @@ import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.event.request.*;
 import com.example.it.mentor.mapper.MentoringRequestMapper;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.MentoringRequestRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class MentoringRequestService {
     private final UserService userService;
     private final MentoringRequestMapper mapper;
     private final ChatService chatService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Создаёт новую заявку на менторство между студентом и ментором.
@@ -116,6 +119,11 @@ public class MentoringRequestService {
 
         requestRepository.save(request);
         log.info("Заявка создана: requestId={}, direction={}, studentProfileId={}, mentorProfileId={}", request.getId(), direction, studentProfile.getId(), mentorProfile.getId());
+
+        Long recipientUserId = direction == MentoringRequestDirection.STUDENT_TO_MENTOR
+                ? mentorProfile.getUser().getId()
+                : studentProfile.getUser().getId();
+        eventPublisher.publishEvent(new MentoringRequestCreatedEvent(request.getId(), recipientUserId));
 
         return mapper.toResponse(request);
     }
@@ -205,6 +213,7 @@ public class MentoringRequestService {
         markAsResponded(request);
         requestRepository.save(request);
         log.info("Запрошено уточнение: requestId={}, userId={}", requestId, currentUser.getId());
+        eventPublisher.publishEvent(new MentoringRequestNeedsClarificationEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
 
@@ -227,6 +236,7 @@ public class MentoringRequestService {
         requestRepository.save(request);
         log.info("Заявка принята: requestId={}, userId={}", requestId, currentUser.getId());
         chatService.createForRequest(request);
+        eventPublisher.publishEvent(new MentoringRequestAcceptedEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
 
@@ -249,6 +259,7 @@ public class MentoringRequestService {
         markAsResponded(request);
         requestRepository.save(request);
         log.info("Заявка отклонена: requestId={}, userId={}", requestId, currentUser.getId());
+        eventPublisher.publishEvent(new MentoringRequestRejectedEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
 
@@ -271,6 +282,7 @@ public class MentoringRequestService {
         request.setStatus(CANCELLED);
         requestRepository.save(request);
         log.info("Заявка отменена: requestId={}, userId={}", requestId, currentUser.getId());
+        eventPublisher.publishEvent(new MentoringRequestCancelledEvent(requestId, recipientUserId(request)));
         return mapper.toResponse(request);
     }
 
@@ -294,6 +306,8 @@ public class MentoringRequestService {
         request.setCompletedAt(OffsetDateTime.now());
         requestRepository.save(request);
         log.info("Менторинг завершён: requestId={}, userId={}", requestId, currentUser.getId());
+        eventPublisher.publishEvent(new MentoringRequestCompletedEvent(requestId, request.getStudentProfile().getUser().getId()));
+        eventPublisher.publishEvent(new MentoringRequestCompletedEvent(requestId, request.getMentorProfile().getUser().getId()));
         return mapper.toResponse(request);
     }
 

@@ -24,4 +24,9 @@ public class LogEmailService implements EmailService {
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
         log.info("=== [EMAIL STUB] Кому: {} | OTP: {} ===", toEmail, otpCode);
     }
+
+    @Override
+    public void send(EmailMessage message) {
+        log.info("=== [EMAIL STUB] Кому: {} | Тема: {} ===", message.to(), message.subject());
+    }
 }

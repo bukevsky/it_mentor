@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>Назначена новая сессия менторинга.</p>
+  <ul>
+    <li>Дата и время: <strong th:text="${scheduledAt}">—</strong></li>
+    <li>Продолжительность: <strong th:text="${durationMinutes} + ' мин.'">—</strong></li>
+    <li>Другой участник: <strong th:text="${counterpartyName}">—</strong></li>
+  </ul>
+  <a th:href="${actionUrl}" class="btn">Открыть сессию</a>
+</div>
+</body>
+</html>

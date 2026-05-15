@@ -1,0 +1,7 @@
+[# th:utext="${recipientName}"/], здравствуйте!
+
+К вам поступила новая заявка на менторство от [(${senderName})].
+[# th:if="${message != null and !#strings.isEmpty(message)}"]
+Сообщение: [(${message})]
+[/]
+Откройте личный кабинет, чтобы рассмотреть заявку: [(${actionUrl})]

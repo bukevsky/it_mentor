@@ -53,6 +53,15 @@ app:
   otp:
     expiration-minutes: 15
     max-attempts: 5
+  notifications:
+    enabled: ${NOTIFICATIONS_ENABLED:true}
+    from-name: "IT Mentor"
+    base-url: ${APP_BASE_URL:http://localhost:5173}
+    timezone: ${APP_TIMEZONE:Europe/Moscow}
+    outbox:
+      max-attempts: 5
+      retry-delay-seconds: 60
+      scan-cron: "0 */1 * * * *"
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
     access-key: ${MINIO_ACCESS_KEY}

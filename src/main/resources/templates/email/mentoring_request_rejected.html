@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ru">
+<head><meta charset="UTF-8"/></head>
+<body>
+<div th:fragment="body-content">
+  <p>Здравствуйте, <strong th:text="${recipientName}">Имя</strong>!</p>
+  <p>К сожалению, ваша заявка на менторство была отклонена.</p>
+  <p th:if="${reason != null and !#strings.isEmpty(reason)}">
+    Причина: <em th:text="${reason}"></em>
+  </p>
+  <p>Вы можете найти другого ментора в каталоге.</p>
+  <a th:href="${actionUrl}" class="btn">Найти ментора</a>
+</div>
+</body>
+</html>
