@@ -17,8 +17,8 @@ public interface AdminAuditLogRepository extends JpaRepository<AdminAuditLog, Lo
             SELECT a FROM AdminAuditLog a
             WHERE (:action IS NULL OR a.action = :action)
               AND (:adminUserId IS NULL OR a.adminUserId = :adminUserId)
-              AND (:from IS NULL OR a.createdAt >= :from)
-              AND (:to IS NULL OR a.createdAt <= :to)
+              AND a.createdAt >= COALESCE(:from, a.createdAt)
+              AND a.createdAt <= COALESCE(:to, a.createdAt)
             """)
     Page<AdminAuditLog> findFiltered(
             @Param("action") AuditAction action,
