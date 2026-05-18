@@ -7,6 +7,8 @@ import com.example.it.mentor.dto.RegisterRequest;
 import com.example.it.mentor.entity.Role;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.entity.enums.AuditAction;
+import com.example.it.mentor.repository.AdminAuditLogRepository;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.UserRepository;
 import com.example.it.mentor.security.UserDetailsServiceImpl;
@@ -34,10 +36,12 @@ class AdminControllerIT {
     @Autowired private UserRepository userRepository;
     @Autowired private RoleRepository roleRepository;
     @Autowired private UserDetailsServiceImpl userDetailsService;
+    @Autowired private AdminAuditLogRepository auditLogRepository;
 
     private String adminToken;
     private String studentToken;
     private Long targetUserId;
+    private Long adminUserId;
 
     @BeforeEach
     void setUp() {
@@ -47,6 +51,7 @@ class AdminControllerIT {
         registerAndLogin(adminEmail);
         grantAdminRole(adminEmail);
         adminToken = login(adminEmail);
+        adminUserId = userRepository.findByEmailAndDeletedFalse(adminEmail).orElseThrow().getId();
 
         studentToken = registerAndLogin(targetEmail);
         targetUserId = userRepository.findByEmailAndDeletedFalse(targetEmail).orElseThrow().getId();
@@ -116,6 +121,21 @@ class AdminControllerIT {
                 new HttpEntity<>(new AdminRoleRequest(RoleCode.MENTOR), headers), Object.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("после assignRole в admin_audit_log появилась запись ROLE_CHANGED")
+    void assignRole_shouldWriteAuditLog() {
+        restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/role", HttpMethod.PUT,
+                bearerRequest(new AdminRoleRequest(RoleCode.MENTOR), adminToken), Void.class);
+
+        assertThat(auditLogRepository.findAll())
+                .anyMatch(e -> e.getAction() == AuditAction.ROLE_CHANGED
+                        && targetUserId.equals(e.getTargetId())
+                        && adminUserId.equals(e.getAdminUserId())
+                        && e.getPayload() != null
+                        && e.getPayload().contains("MENTOR"));
     }
 
     @Test

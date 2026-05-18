@@ -9,6 +9,7 @@ import com.example.it.mentor.dto.mentor.MentorProfileResponse;
 import com.example.it.mentor.dto.mentoring.MentoringRequestCreateRequest;
 import com.example.it.mentor.dto.mentoring.MentoringRequestResponse;
 import com.example.it.mentor.dto.review.CreateReviewRequest;
+import com.example.it.mentor.dto.review.ModerateReviewRequest;
 import com.example.it.mentor.dto.review.ReviewResponse;
 import com.example.it.mentor.dto.student.StudentProfileRequest;
 import com.example.it.mentor.dto.student.StudentProfileResponse;
@@ -17,6 +18,7 @@ import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.enums.MentoringType;
 import com.example.it.mentor.entity.enums.RecruitmentStatus;
+import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.UserRepository;
 import com.example.it.mentor.security.UserDetailsServiceImpl;
@@ -367,14 +369,83 @@ class ReviewControllerIT {
         }
     }
 
+    // ── видимость скрытого отзыва ─────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("видимость скрытого отзыва")
+    class HiddenReviewVisibility {
+
+        private Long reviewId;
+        private String adminToken;
+
+        @BeforeEach
+        void seedReviewAndAdmin() {
+            CreateReviewRequest dto = new CreateReviewRequest(completedRequestId, 5, "Отлично");
+            ResponseEntity<ReviewResponse> created = restTemplate.exchange(
+                    "/reviews", HttpMethod.POST, bearerRequest(dto, studentToken), ReviewResponse.class);
+            reviewId = created.getBody().id();
+
+            String adminEmail = "rev_admin_" + uid() + "@test.com";
+            adminToken = registerAndLogin(adminEmail);
+            grantAdminRole(adminEmail);
+            adminToken = login(adminEmail);
+        }
+
+        @Test
+        @DisplayName("после HIDDEN отзыв исчезает из публичного списка")
+        void hiddenReview_shouldBeExcludedFromPublicList() {
+            hide(reviewId);
+
+            ResponseEntity<PagedResponse<ReviewResponse>> response = restTemplate.exchange(
+                    "/profiles/mentors/" + mentorProfileId + "/reviews", HttpMethod.GET,
+                    noAuthRequest(), PAGED_REVIEW);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody().content())
+                    .noneMatch(r -> reviewId.equals(r.id()));
+        }
+
+        @Test
+        @DisplayName("автор всё ещё видит свой скрытый отзыв через /reviews/by-request")
+        void hiddenReview_authorCanStillFetchByRequest() {
+            hide(reviewId);
+
+            ResponseEntity<ReviewResponse> response = restTemplate.exchange(
+                    "/reviews/by-request/" + completedRequestId, HttpMethod.GET,
+                    bearerRequest(null, studentToken), ReviewResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getBody().moderationStatus()).isEqualTo(ReviewModerationStatus.HIDDEN);
+        }
+
+        private void hide(Long id) {
+            restTemplate.exchange("/admin/reviews/" + id + "/moderate", HttpMethod.PUT,
+                    bearerRequest(new ModerateReviewRequest(ReviewModerationStatus.HIDDEN), adminToken),
+                    ReviewResponse.class);
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private String registerAndLogin(String email) {
         restTemplate.postForEntity("/auth/register",
                 new RegisterRequest(email, "Password123!", "Иван", "Иванов"), Object.class);
+        return login(email);
+    }
+
+    private String login(String email) {
         ResponseEntity<LoginResponse> resp = restTemplate.postForEntity(
                 "/auth/login", new LoginRequest(email, "Password123!"), LoginResponse.class);
         return resp.getBody().accessToken();
+    }
+
+    private void grantAdminRole(String email) {
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
+        Role adminRole = roleRepository.findByCode(RoleCode.ADMIN).orElseThrow();
+        user.getRoles().clear();
+        user.getRoles().add(adminRole);
+        userRepository.save(user);
+        userDetailsService.evictUserCache(email);
     }
 
     private void grantMentorRole(String email) {
