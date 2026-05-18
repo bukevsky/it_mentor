@@ -9,6 +9,7 @@ import com.example.it.mentor.entity.Review;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.enums.MentoringRequestStatus;
+import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
@@ -88,7 +89,7 @@ class ReviewServiceTest {
                 .build();
         ReflectionTestUtils.setField(review, "id", 300L);
 
-        reviewResponse = new ReviewResponse(300L, 100L, 1L, 2L, 5, "Отличный ментор!", OffsetDateTime.now());
+        reviewResponse = new ReviewResponse(300L, 100L, 1L, 2L, 5, "Отличный ментор!", ReviewModerationStatus.VISIBLE, OffsetDateTime.now());
     }
 
     // ── createReview ──────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ class ReviewServiceTest {
             assertThat(saved.getMentorUserId()).isEqualTo(2L);
             assertThat(saved.getReviewer()).isSameAs(studentUser);
             assertThat(saved.getMentoringRequest()).isSameAs(completedRequest);
+            assertThat(saved.getModerationStatus()).isEqualTo(ReviewModerationStatus.VISIBLE);
         }
 
         @Test
@@ -263,7 +265,7 @@ class ReviewServiceTest {
         void getMentorReviews_happyPath_shouldReturnPage() {
             when(mentorProfileRepository.findById(20L)).thenReturn(Optional.of(mentorProfile));
             Page<Review> page = new PageImpl<>(List.of(review));
-            when(reviewRepository.findByMentorUserId(eq(2L), any())).thenReturn(page);
+            when(reviewRepository.findByMentorUserId(eq(2L), eq(ReviewModerationStatus.VISIBLE), any())).thenReturn(page);
             when(mapper.toResponse(review)).thenReturn(reviewResponse);
 
             PagedResponse<ReviewResponse> result = service.getMentorReviews(20L, PageRequest.of(0, 20));
@@ -277,7 +279,7 @@ class ReviewServiceTest {
         void getMentorReviews_emptyList_shouldReturnEmptyPage() {
             when(mentorProfileRepository.findById(20L)).thenReturn(Optional.of(mentorProfile));
             Page<Review> emptyPage = new PageImpl<>(List.of());
-            when(reviewRepository.findByMentorUserId(eq(2L), any())).thenReturn(emptyPage);
+            when(reviewRepository.findByMentorUserId(eq(2L), eq(ReviewModerationStatus.VISIBLE), any())).thenReturn(emptyPage);
 
             PagedResponse<ReviewResponse> result = service.getMentorReviews(20L, PageRequest.of(0, 20));
 
@@ -291,6 +293,43 @@ class ReviewServiceTest {
             when(mentorProfileRepository.findById(999L)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> service.getMentorReviews(999L, PageRequest.of(0, 20)))
+                    .isInstanceOf(NotFoundException.class);
+        }
+    }
+
+    // ── moderate ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("moderate")
+    class Moderate {
+
+        @Test
+        @DisplayName("happyPath — admin скрывает отзыв")
+        void moderate_happyPath_shouldSetStatusAndModerator() {
+            when(reviewRepository.findById(300L)).thenReturn(Optional.of(review));
+            when(userService.getCurrentUserEntity()).thenReturn(mentorUser);
+            when(reviewRepository.save(any())).thenReturn(review);
+            when(mapper.toResponse(review)).thenReturn(reviewResponse);
+
+            var dto = new com.example.it.mentor.dto.review.ModerateReviewRequest(ReviewModerationStatus.HIDDEN);
+            service.moderate(300L, dto);
+
+            ArgumentCaptor<Review> captor = ArgumentCaptor.forClass(Review.class);
+            verify(reviewRepository).save(captor.capture());
+            Review saved = captor.getValue();
+            assertThat(saved.getModerationStatus()).isEqualTo(ReviewModerationStatus.HIDDEN);
+            assertThat(saved.getModeratedBy()).isEqualTo(2L);
+            assertThat(saved.getModeratedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("notFound — отзыв не найден → NotFoundException")
+        void moderate_notFound_shouldThrowNotFound() {
+            when(reviewRepository.findById(999L)).thenReturn(Optional.empty());
+
+            var dto = new com.example.it.mentor.dto.review.ModerateReviewRequest(ReviewModerationStatus.HIDDEN);
+
+            assertThatThrownBy(() -> service.moderate(999L, dto))
                     .isInstanceOf(NotFoundException.class);
         }
     }

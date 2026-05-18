@@ -1,7 +1,10 @@
 package com.example.it.mentor.entity;
 
+import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import jakarta.persistence.*;
 import lombok.*;
+
+import java.time.OffsetDateTime;
 
 @Entity
 @Table(name = "reviews")
@@ -28,4 +31,15 @@ public class Review extends BaseEntity {
 
     @Column(columnDefinition = "TEXT")
     private String comment;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "moderation_status", nullable = false, length = 20)
+    private ReviewModerationStatus moderationStatus = ReviewModerationStatus.VISIBLE;
+
+    @Column(name = "moderated_by")
+    private Long moderatedBy;
+
+    @Column(name = "moderated_at")
+    private OffsetDateTime moderatedAt;
 }

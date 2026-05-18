@@ -9,6 +9,7 @@ import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.UserStatus;
+import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
 import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.repository.MentorProfileRepository;
@@ -16,8 +17,10 @@ import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import com.example.it.mentor.repository.UserRepository;
 import com.example.it.mentor.security.UserDetailsServiceImpl;
+import com.example.it.mentor.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -39,6 +42,8 @@ public class AdminService {
     private final StudentProfileRepository studentProfileRepository;
     private final MentorProfileRepository mentorProfileRepository;
     private final UserDetailsServiceImpl userDetailsService;
+    private final UserService userService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void assignRole(Long userId, RoleCode targetRole) {
@@ -47,11 +52,18 @@ public class AdminService {
         User user = loadUser(userId);
         Role roleToAdd = loadRole(targetRole);
         RoleCode roleToRemove = targetRole == RoleCode.MENTOR ? RoleCode.STUDENT : RoleCode.MENTOR;
+        RoleCode oldRole = user.getRoles().stream()
+                .map(Role::getCode)
+                .filter(c -> c == roleToRemove)
+                .findFirst()
+                .orElse(roleToRemove);
         replaceRole(user, roleToAdd, targetRole, roleToRemove);
         userRepository.save(user);
         log.info("Роль назначена: userId={}, newRole={}, removedRole={}", userId, targetRole, roleToRemove);
         ensureProfileExists(user, userId, targetRole);
         userDetailsService.evictUserCache(user.getEmail());
+        Long adminId = userService.getCurrentUserEntity().getId();
+        eventPublisher.publishEvent(new RoleChangedAuditEvent(adminId, userId, oldRole, targetRole));
     }
 
     @Transactional(readOnly = true)

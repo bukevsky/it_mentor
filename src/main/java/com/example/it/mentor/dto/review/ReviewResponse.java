@@ -1,5 +1,7 @@
 package com.example.it.mentor.dto.review;
 
+import com.example.it.mentor.entity.enums.ReviewModerationStatus;
+
 import java.time.OffsetDateTime;
 
 public record ReviewResponse(
@@ -9,6 +11,7 @@ public record ReviewResponse(
         Long mentorUserId,
         int rating,
         String comment,
+        ReviewModerationStatus moderationStatus,
         OffsetDateTime createdAt
 ) {
 }
