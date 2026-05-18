@@ -22,7 +22,9 @@
 | Логирование        | SLF4J, MDC-трейсинг, структурированный JSON-формат      |
 | API-документация   | springdoc-openapi 3.0.2 — Swagger UI                    |
 | Метрики            | Spring Boot Actuator + Micrometer Prometheus            |
-| Тестирование       | JUnit 5, Mockito, AssertJ, Testcontainers 1.20.4        |
+| JSON                | Jackson 3 (`tools.jackson.*`, через `spring-boot-starter-jackson`) |
+| Email               | `spring-boot-starter-mail` + outbox-таблица для надёжной доставки |
+| Тестирование       | JUnit 5, Mockito, AssertJ, Testcontainers 1.21.3, docker-java 3.5.1 |
 | Контейнеризация    | Docker Compose (PostgreSQL + MinIO + MailHog)           |
 | CI                 | GitHub Actions (Java 25 + Testcontainers)               |
 | Качество кода      | JaCoCo + SonarQube + sonarqube-community-branch-plugin  |
@@ -163,8 +165,38 @@ Query params для поиска менторов: `q`, `skillIds[]`, `cityId`, 
 | :------- | :----------------------------------- | :-------- | :------------------------------------------ |
 | `POST`   | `/reviews`                           | JWT       | Создать отзыв (только студент, статус COMPLETED) |
 | `GET`    | `/reviews/by-request/{requestId}`    | JWT       | Отзыв по ID заявки (видят только участники) |
-| `GET`    | `/profiles/mentors/{id}/reviews`     | Публичный | Отзывы ментора, пагинация, сортировка по createdAt DESC |
+| `GET`    | `/profiles/mentors/{id}/reviews`     | Публичный | Публичные отзывы ментора (только `moderationStatus = VISIBLE`), пагинация, сортировка по createdAt DESC |
 | `DELETE` | `/reviews/{id}`                      | JWT       | Удалить свой отзыв                          |
+
+`ReviewResponse` содержит поле `moderationStatus` (`VISIBLE` / `HIDDEN` / `UNDER_REVIEW`). Публичные списки и средний рейтинг считаются только по `VISIBLE` — администратор может скрыть нарушение через `/admin/reviews/{id}/moderate`.
+
+### Календарные сессии (`/sessions`)
+
+| Метод  | Путь                            | Доступ | Описание                                                |
+| :----- | :------------------------------ | :----- | :------------------------------------------------------ |
+| `POST` | `/sessions`                     | JWT    | Создать сессию для принятой заявки (`mentoringRequestId`, `scheduledAt`, `durationMinutes` 15–480) |
+| `GET`  | `/sessions`                     | JWT    | Сессии текущего пользователя (пагинация, sort whitelist: `scheduledAt`, `createdAt`, `status`) |
+| `GET`  | `/sessions/{id}`                | JWT    | Сессия по ID (только участник)                          |
+| `PUT`  | `/sessions/{id}/reschedule`     | JWT    | Перенести: `newScheduledAt`, `durationMinutes`, `reason` |
+| `PUT`  | `/sessions/{id}/cancel`         | JWT    | Отменить с опциональной причиной                        |
+| `PUT`  | `/sessions/{id}/complete`       | JWT    | Зафиксировать проведённую сессию                        |
+
+Статусы: `SCHEDULED` → `RESCHEDULED` → `COMPLETED` / `CANCELLED` / `NO_SHOW`. Сессии можно создавать только для заявок в `ACCEPTED`.
+
+### Жалобы (`/complaints`)
+
+| Метод  | Путь                                  | Доступ | Описание                                            |
+| :----- | :------------------------------------ | :----- | :-------------------------------------------------- |
+| `POST` | `/complaints`                         | JWT    | Подать жалобу: `targetType` (`REVIEW` / `USER`), `targetId`, `reason` |
+
+### Настройки уведомлений (`/profile/me/notifications`)
+
+| Метод | Путь                              | Доступ | Описание                                              |
+| :---- | :-------------------------------- | :----- | :---------------------------------------------------- |
+| `GET` | `/profile/me/notifications`       | JWT    | Текущие флаги: `emailRequestEvents`, `emailSessionEvents`, `emailReviewEvents` |
+| `PUT` | `/profile/me/notifications`       | JWT    | Обновить флаги (любое подмножество, `null` поля игнорируются) |
+
+Outbox-паттерн: события публикуются как `NotificationOutbox`-записи, шедулер их рассылает с retry. Local-профиль использует MailHog (`http://localhost:8025`).
 
 ### Файлы (`/files`)
 
@@ -238,13 +270,21 @@ SSE-события: `chat.message.created`, `chat.read`, `chat.typing`, `presenc
 
 ### Администрирование (`/admin`)
 
-| Метод | Путь                         | Доступ | Описание                                             |
-| :---- | :--------------------------- | :----- | :--------------------------------------------------- |
-| `PUT` | `/admin/users/{userId}/role` | ADMIN  | Назначить роль STUDENT или MENTOR                    |
-| `GET` | `/admin/users`               | ADMIN  | Список пользователей с фильтрами (q, role, status)   |
-| `GET` | `/admin/users/stats`         | ADMIN  | Статистика пользователей (по ролям и статусам)       |
+| Метод | Путь                                  | Доступ | Описание                                             |
+| :---- | :------------------------------------ | :----- | :--------------------------------------------------- |
+| `PUT` | `/admin/users/{userId}/role`          | ADMIN  | Назначить роль STUDENT или MENTOR                    |
+| `GET` | `/admin/users`                        | ADMIN  | Список пользователей с фильтрами (q, role, status)   |
+| `GET` | `/admin/users/stats`                  | ADMIN  | Статистика пользователей (по ролям и статусам)       |
+| `GET` | `/admin/complaints`                   | ADMIN  | Список жалоб (фильтры `status`, `targetType`, пагинация) |
+| `PUT` | `/admin/complaints/{id}/resolve`      | ADMIN  | Разрешить жалобу: `status` (`RESOLVED` / `REJECTED`), `resolution` |
+| `PUT` | `/admin/reviews/{id}/moderate`        | ADMIN  | Модерация отзыва: `moderationStatus` (`VISIBLE` / `HIDDEN` / `UNDER_REVIEW`) |
+| `GET` | `/admin/audit`                        | ADMIN  | Аудит-лог: фильтры `action`, `adminUserId`, `from`, `to`, пагинация |
+| `GET` | `/admin/notifications/outbox`         | ADMIN  | Outbox писем: фильтр `status` (`PENDING` / `SENT` / `FAILED`) |
 
 Query params для `/admin/users`: `q`, `role`, `status`, `page`, `size`, `sort` (whitelist: `createdAt`, `email`, `status`).
+Sort whitelist `/admin/complaints`: `createdAt`, `status`, `resolvedAt`. Sort whitelist `/admin/audit`: `createdAt`, `action`.
+
+Модерация и разрешение жалоб публикуют события (`RoleChangedAuditEvent`, `ReviewModeratedAuditEvent`, `ComplaintResolvedAuditEvent`) → `AuditWriter` пишет запись в `admin_audit_log` через `@Transactional(REQUIRES_NEW)`, payload — JSONB.
 
 ---
 
@@ -269,31 +309,46 @@ Query params для `/admin/users`: `q`, `role`, `status`, `page`, `size`, `sort
 ```
 com.example.it.mentor
 ├── config/         SecurityConfig, JpaConfig, OpenApiConfig, StorageConfig,
-│                   StorageProperties, CacheConfig, OtpConfig, OtpProperties
+│                   StorageProperties, CacheConfig, OtpConfig, OtpProperties,
+│                   MailExecutorConfig, NotificationOutboxProperties
 ├── filter/         MdcFilter (X-Request-Id → MDC requestId)
 ├── security/       JwtProvider, JwtAuthenticationFilter, UserDetailsServiceImpl,
 │                   AppUserDetails, Http401EntryPoint, Http403AccessDeniedHandler
 ├── controller/     Auth, Dictionary, StudentProfile, MentorProfile, Profile,
-│                   File, Mentoring, Chat, Review, Admin, Dashboard,
-│                   MentorStats, Presence                       (~18 шт.)
+│                   File, Mentoring, MentoringSession, Chat, Review, Complaint,
+│                   Admin, AdminReview, AdminComplaint, AdminAudit,
+│                   AdminNotification, NotificationPreferences, Dashboard,
+│                   MentorStats, Presence                       (~20 шт.)
 ├── service/        Auth, User, Dictionary, StudentProfile, MentorProfile, Profile,
-│                   MentoringRequest, Chat, Review, Admin, Dashboard,
-│                   MentorStats, Presence, FileStorage, FileStorageService,
-│                   EmailService, LogEmailService, SmtpEmailService (~15 шт.)
-├── repository/     Spring Data репозитории + MentorProfileSpecification (~20 шт.)
-├── entity/         BaseEntity, User, Role, UserStatus, RoleCode,
-│                   PasswordResetToken, StudentProfile + связанные сущности,
-│                   MentorProfile + MentorSkill, MentoringRequest,
-│                   Chat, ChatMessage, Review, StoredFile, UserPresence
+│                   MentoringRequest, MentoringSession, Chat, ChatSse, Typing,
+│                   Review, Complaint, Admin, Dashboard, MentorStats, Presence,
+│                   NotificationPreferences, FileStorage(Service),
+│                   EmailService / LogEmailService / SmtpEmailService
+│   ├── audit/      AuditWriter, AdminAuditEventListener (sealed AuditEvent → JSONB)
+│   └── notification/  NotificationOutboxService, NotificationOutboxEntryProcessor,
+│                       NotificationEventListener (события заявок/сессий/отзывов)
+├── repository/     Spring Data репозитории + MentorProfileSpecification (~25 шт.)
+├── event/audit/    sealed AuditEvent: RoleChangedAuditEvent,
+│                   ReviewModeratedAuditEvent, ComplaintResolvedAuditEvent
+├── entity/         BaseEntity, User, Role, UserStatus, RoleCode, PasswordResetToken,
+│                   StudentProfile + связанные сущности, MentorProfile + MentorSkill,
+│                   MentoringRequest, MentoringSession, Chat, ChatMessage,
+│                   ChatReadState, Review, StoredFile, UserPresence, Complaint,
+│                   AdminAuditLog, NotificationOutbox, UserNotificationPreferences
 │   ├── dict/       DictCity, DictSkill, DictLanguage, DictInteractionType
 │   └── enums/      WorkFormat, EmploymentType, EducationDegree, EducationForm,
 │                   LanguageLevel, SkillLevel, RecruitmentStatus, FileType,
-│                   MentoringType, MentoringChannel, MentoringDuration,
-│                   MentoringRequestStatus, MentoringRequestDirection, FileStatus
-├── dto/            Java records: student/, mentor/, mentoring/, chat/,
-│                   review/, dict/, dashboard/, admin/, presence/
+│                   FileStatus, MentoringType, MentoringChannel,
+│                   MentoringDuration, MentoringRequestStatus,
+│                   MentoringRequestDirection, MentoringSessionStatus,
+│                   ReviewModerationStatus, ComplaintStatus,
+│                   ComplaintTargetType, AuditAction, NotificationOutboxStatus
+├── dto/            Java records: student/, mentor/, mentoring/, session/, chat/,
+│                   review/, complaint/, audit/, notification/, dict/,
+│                   dashboard/, admin/, presence/, sse/
 ├── mapper/         MapStruct: Auth, Dictionary, StudentProfile, MentorProfile,
-│                   MentoringRequest, Chat, Review, Enum
+│                   MentoringRequest, MentoringSession, Chat, Review,
+│                   Complaint, AuditLog, Enum
 └── exception/      ApiException → NotFoundException, ConflictException,
                     UnauthorizedException, ForbiddenException,
                     BusinessRuleViolationException, StorageException;
@@ -378,12 +433,18 @@ users ──< user_roles >── roles
   ├── stored_files (RESUME, PORTFOLIO, AVATAR, CHAT_ATTACHMENT)
   │
   ├── mentoring_requests (student_profile_id, mentor_profile_id)
-  │       └──── reviews (mentoring_request_id, reviewer_user_id, mentor_user_id)
+  │       ├──── reviews (mentoring_request_id, reviewer_user_id, mentor_user_id, moderation_status)
+  │       └──< mentoring_sessions (scheduled_at, duration_minutes, status)
   │
   ├── chats ──< chat_messages (senderUserId, body, attachmentFileId)
   │       └──< chat_read_states (userId, lastReadMessageId)
   │
-  └── user_presence (userId, status, lastSeenAt)
+  ├── user_presence (userId, status, lastSeenAt)
+  ├── user_notification_preferences (emailRequestEvents, emailSessionEvents, emailReviewEvents)
+  ├── notification_outbox (recipientEmail, subject, eventType, status, attempts, nextAttemptAt)
+  │
+  ├── complaints (target_type, target_id, reporter_user_id, status, resolved_by)
+  └── admin_audit_log (admin_user_id, action, target_type, target_id, payload jsonb)
 ```
 
 ### Миграции
@@ -410,6 +471,12 @@ users ──< user_roles >── roles
 | `018_extend_stored_files.sql`               | Колонка `status` (ACTIVE/DELETED), индексы                 |
 | `019_student_profile_positions.sql`         | Поле `position` в `student_skills` и `student_languages`   |
 | `020_create_user_presence.sql`              | Таблица `user_presence`                                    |
+| `021_create_mentoring_sessions.sql`         | Таблица `mentoring_sessions` (планирование сессий)         |
+| `022_create_notification_preferences.sql`   | `user_notification_preferences` (per-user email-флаги)     |
+| `023_create_notification_outbox.sql`        | `notification_outbox` (надёжная доставка писем, retry)     |
+| `024_create_complaints.sql`                 | Таблица `complaints` + индексы                             |
+| `025_extend_reviews_moderation.sql`         | Колонки `moderation_status`, `moderated_by`, `moderated_at` в `reviews` |
+| `026_create_admin_audit_log.sql`            | `admin_audit_log` (JSONB payload, индексы по `action`/`createdAt`) |
 
 ---
 
@@ -432,27 +499,33 @@ docker compose up -d sonarqube
 ## Тестирование
 
 ```bash
-# Все тесты (Testcontainers поднимет PostgreSQL автоматически)
+# Все unit-тесты (Surefire)
 ./mvnw test
 
-# Один класс
+# Один класс / метод
 ./mvnw test -Dtest=AuthControllerIT
-
-# Один метод
 ./mvnw test -Dtest=AuthServiceTest#register_happyPath_shouldReturnResponse
 
-# Полная верификация с JaCoCo
+# Полная верификация: unit + IT + JaCoCo (Failsafe)
 ./mvnw clean verify
 ```
+
+### Docker Desktop ≥ 4.40 на macOS
+
+После апгрейда Docker Desktop старая связка Testcontainers 1.20.4 + docker-java 3.4.2 отдаёт `BadRequest 400: client version 1.32 is too old`. Решение уже зашито в проект:
+
+- `pom.xml`: `testcontainers.version=1.21.3` + явный override `docker-java-api`/`-transport-zerodep` на `3.5.1` через `<exclusions>`;
+- `maven-surefire-plugin` и `maven-failsafe-plugin` пробрасывают `-Dapi.version=1.43` через `<systemPropertyVariables>` (env-переменная `DOCKER_API_VERSION` docker-java'ой игнорируется);
+- На локальной macOS-машине нужен `~/.testcontainers.properties` с `docker.host=unix:///Users/<you>/Library/Containers/com.docker.docker/Data/docker.raw.sock` — обход «gate»-сокета Docker Desktop, который non-CLI клиентам отдаёт пустой `Info` со статусом 400. На Linux CI этот файл не нужен.
 
 ### Структура тестов
 
 | Тип                  | Количество | Подход                                               |
 | :------------------- | :--------- | :--------------------------------------------------- |
-| Unit-тесты сервисов  | ~11 классов | `@ExtendWith(MockitoExtension.class)` + Mockito      |
-| Интеграционные тесты | ~22 класса | `@SpringBootTest` + TestRestTemplate + Testcontainers |
+| Unit-тесты сервисов  | ~25 классов | `@ExtendWith(MockitoExtension.class)` + Mockito      |
+| Интеграционные тесты | ~25 классов (309 кейсов) | `@SpringBootTest` + TestRestTemplate + Testcontainers |
 
-IT-тест классы: `AdminControllerIT`, `AdminUsersControllerIT`, `AuthControllerIT`, `AuthPasswordResetIT`, `ChatControllerIT`, `ChatReadControllerIT`, `DashboardControllerIT`, `DictionaryControllerIT`, `ErrorResponseFormatIT`, `FileControllerIT`, `MentorProfileControllerIT`, `MentorSearchControllerIT`, `MentoringRequestControllerIT`, `MentoringRequestMentorToStudentIT`, `MentoringRequestPaginationIT`, `MentoringRequestStateTransitionsIT`, `PresenceControllerIT`, `ProfileSummaryIT`, `ReviewControllerIT`, `StudentCatalogControllerIT`, `StudentProfileControllerIT`, `TypingControllerIT`.
+IT-тест классы: `AdminControllerIT`, `AdminNotificationControllerIT`, `AdminUsersControllerIT`, `AuthControllerIT`, `AuthPasswordResetIT`, `ChatControllerIT`, `ChatReadControllerIT`, `DashboardControllerIT`, `DictionaryControllerIT`, `ErrorResponseFormatIT`, `FileControllerIT`, `MentorProfileControllerIT`, `MentorSearchControllerIT`, `MentoringRequestControllerIT`, `MentoringRequestMentorToStudentIT`, `MentoringRequestPaginationIT`, `MentoringRequestStateTransitionsIT`, `MentoringSessionControllerIT`, `NotificationPreferencesControllerIT`, `PresenceControllerIT`, `ProfileSummaryIT`, `ReviewControllerIT`, `StudentCatalogControllerIT`, `StudentProfileControllerIT`, `TypingControllerIT`.
 
 ### Соглашения
 
@@ -548,17 +621,17 @@ it.mentor/
 
 | Категория             | Количество |
 | :-------------------- | :--------- |
-| Тестов (JUnit 5)      | 262        |
-| IT-тест классов       | ~22        |
-| Unit-тест классов     | ~11        |
-| REST-эндпоинтов       | ~60        |
-| SQL-миграций          | 20         |
-| Таблиц в БД           | ~20        |
-| Контроллеров          | ~18        |
-| Сервисов              | ~15        |
-| Репозиториев          | ~20        |
-| JPA-сущностей         | ~20        |
-| Перечислений (enum)   | ~15        |
+| Тестов (JUnit 5)      | 309 IT + ~140 unit |
+| IT-тест классов       | ~25        |
+| Unit-тест классов     | ~25        |
+| REST-эндпоинтов       | ~80        |
+| SQL-миграций          | 26         |
+| Таблиц в БД           | ~28        |
+| Контроллеров          | ~20        |
+| Сервисов              | ~20        |
+| Репозиториев          | ~25        |
+| JPA-сущностей         | ~25        |
+| Перечислений (enum)   | ~20        |
 
 ---
 
@@ -575,3 +648,5 @@ it.mentor/
 - [x] **Stage 9** — Отзывы на менторов: рейтинг 1–5, публичные страницы
 - [x] **Phase 1** — Дашборд, SSE-чат в реальном времени, каталог студентов, profile UX (PATCH + completion), file manager (list/download/delete/replace), статистика ментора, Admin users/stats
 - [x] **Phase 2** — Typing events, user presence (online/offline)
+- [x] **Stage 10** — Календарные сессии менторинга (`/sessions/**`), email-уведомления (outbox + retry + per-user preferences)
+- [x] **Phase 4** — Admin Moderation & Audit: жалобы (`/complaints`, `/admin/complaints/**`), модерация отзывов (`/admin/reviews/{id}/moderate`), аудит-лог админ-действий (`/admin/audit`), просмотр email-outbox (`/admin/notifications/outbox`)

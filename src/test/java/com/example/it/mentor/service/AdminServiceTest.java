@@ -5,6 +5,7 @@ import com.example.it.mentor.entity.Role;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
@@ -17,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.HashSet;
@@ -39,6 +41,8 @@ class AdminServiceTest {
     @Mock private StudentProfileRepository studentProfileRepository;
     @Mock private MentorProfileRepository mentorProfileRepository;
     @Mock private UserDetailsServiceImpl userDetailsService;
+    @Mock private UserService userService;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @Test
     @DisplayName("assignRole to MENTOR without mentor profile creates profile from student names and evicts cache")
@@ -51,10 +55,14 @@ class AdminServiceTest {
                 .lastName("Иванов")
                 .build();
 
+        User admin = User.builder().email("admin@test.com").build();
+        ReflectionTestUtils.setField(admin, "id", 99L);
+
         when(userRepository.findWithRolesById(1L)).thenReturn(Optional.of(user));
         when(roleRepository.findByCode(RoleCode.MENTOR)).thenReturn(Optional.of(mentorRole));
         when(mentorProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
         when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.of(studentProfile));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
 
         service.assignRole(1L, RoleCode.MENTOR);
 
@@ -79,10 +87,14 @@ class AdminServiceTest {
                 .lastName("Смирнова")
                 .build();
 
+        User admin = User.builder().email("admin@test.com").build();
+        ReflectionTestUtils.setField(admin, "id", 99L);
+
         when(userRepository.findWithRolesById(2L)).thenReturn(Optional.of(user));
         when(roleRepository.findByCode(RoleCode.STUDENT)).thenReturn(Optional.of(studentRole));
         when(studentProfileRepository.findByUserId(2L)).thenReturn(Optional.empty());
         when(mentorProfileRepository.findByUserId(2L)).thenReturn(Optional.of(mentorProfile));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
 
         service.assignRole(2L, RoleCode.STUDENT);
 
@@ -94,6 +106,33 @@ class AdminServiceTest {
         assertThat(user.getRoles()).anyMatch(role -> role.getCode() == RoleCode.STUDENT);
         assertThat(user.getRoles()).noneMatch(role -> role.getCode() == RoleCode.MENTOR);
         verify(userDetailsService).evictUserCache("mentor@test.com");
+    }
+
+    @Test
+    @DisplayName("assignRole — публикует RoleChangedAuditEvent с oldRole и newRole")
+    void assignRole_publishesRoleChangedAuditEvent_withOldAndNewRole() {
+        User user = userWithRole(RoleCode.STUDENT, "user@test.com");
+        ReflectionTestUtils.setField(user, "id", 1L);
+        Role mentorRole = role(RoleCode.MENTOR);
+
+        User admin = User.builder().email("admin@test.com").build();
+        ReflectionTestUtils.setField(admin, "id", 99L);
+
+        when(userRepository.findWithRolesById(1L)).thenReturn(Optional.of(user));
+        when(roleRepository.findByCode(RoleCode.MENTOR)).thenReturn(Optional.of(mentorRole));
+        when(mentorProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.assignRole(1L, RoleCode.MENTOR);
+
+        ArgumentCaptor<RoleChangedAuditEvent> captor = ArgumentCaptor.forClass(RoleChangedAuditEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        RoleChangedAuditEvent event = captor.getValue();
+        assertThat(event.adminUserId()).isEqualTo(99L);
+        assertThat(event.targetUserId()).isEqualTo(1L);
+        assertThat(event.oldRole()).isEqualTo(RoleCode.STUDENT);
+        assertThat(event.newRole()).isEqualTo(RoleCode.MENTOR);
     }
 
     private User userWithRole(RoleCode code, String email) {

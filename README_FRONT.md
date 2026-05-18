@@ -26,6 +26,10 @@
   - [4.12 Dashboard](#412-dashboard)
   - [4.13 Mentor Stats](#413-mentor-stats)
   - [4.14 Presence](#414-presence)
+  - [4.15 Mentoring Sessions](#415-mentoring-sessions)
+  - [4.16 Notification Preferences](#416-notification-preferences)
+  - [4.17 Complaints](#417-complaints)
+  - [4.18 Admin: Moderation & Audit](#418-admin-moderation--audit)
 - [5. TypeScript-типы (полная карта DTO)](#5-typescript-типы-полная-карта-dto)
 - [6. Enum-справочник](#6-enum-справочник)
 - [7. Загрузка файлов](#7-загрузка-файлов)
@@ -1476,6 +1480,7 @@ fetchEventSource(`${BASE_URL}/chats/events`, {
   "mentorUserId": 2,
   "rating": 5,
   "comment": "Отличный ментор!",
+  "moderationStatus": "VISIBLE",
   "createdAt": "2025-03-19T14:30:00+03:00"
 }
 ```
@@ -1494,7 +1499,7 @@ fetchEventSource(`${BASE_URL}/chats/events`, {
 
 **Auth:** Требуется JWT (видят только студент-автор или ментор из заявки)
 
-**Response:** `200 OK` — `ReviewResponse`
+**Response:** `200 OK` — `ReviewResponse` (включает `moderationStatus`)
 
 **Ошибки:** `403` если нет доступа, `404` если отзыва нет.
 
@@ -1506,7 +1511,7 @@ fetchEventSource(`${BASE_URL}/chats/events`, {
 
 **Query params:** `page` (default `0`), `size` (default `20`)
 
-**Response:** `200 OK` — `PagedResponse<ReviewResponse>` (сортировка по `createdAt DESC`)
+**Response:** `200 OK` — `PagedResponse<ReviewResponse>` (только записи с `moderationStatus = VISIBLE`, сортировка по `createdAt DESC`). Скрытые администратором отзывы не отдаются и не учитываются в среднем рейтинге.
 
 ```typescript
 // Пример: загрузить отзывы ментора
@@ -1652,6 +1657,330 @@ const reviews = await apiCall<PagedResponse<ReviewResponse>>(
 | `lastSeenAt` | string \| null | Время последней активности (OffsetDateTime) |
 
 **Использование:** Запрашивайте перед открытием чата, чтобы показать статус собеседника. Обновления приходят через SSE-событие `presence.changed`.
+
+---
+
+### 4.15 Mentoring Sessions
+
+Календарные сессии можно создавать только для заявок в статусе `ACCEPTED`. Доступ имеют только участники заявки (студент и ментор).
+
+#### `POST /sessions` — Создать сессию
+
+**Auth:** Требуется JWT (участник заявки)
+
+**Request:**
+```json
+{
+  "mentoringRequestId": 5,
+  "scheduledAt": "2026-06-01T14:00:00+03:00",
+  "durationMinutes": 60
+}
+```
+
+| Поле | Тип | Обязательное | Валидация |
+|---|---|---|---|
+| `mentoringRequestId` | number | да | `@NotNull` |
+| `scheduledAt` | string (OffsetDateTime) | да | `@Future` |
+| `durationMinutes` | number | да | 15 ≤ value ≤ 480 |
+
+**Response:** `201 Created` — `SessionResponse`
+```json
+{
+  "id": 100,
+  "mentoringRequestId": 5,
+  "studentUserId": 1,
+  "mentorUserId": 2,
+  "studentName": "Анна Смирнова",
+  "mentorName": "Иван Петров",
+  "scheduledAt": "2026-06-01T14:00:00+03:00",
+  "durationMinutes": 60,
+  "status": "SCHEDULED",
+  "cancelReason": null,
+  "rescheduleReason": null,
+  "createdAt": "2026-05-18T20:00:00+03:00",
+  "updatedAt": "2026-05-18T20:00:00+03:00"
+}
+```
+
+**Ошибки:** `403` (не участник заявки), `404` (заявка не найдена), `422` (заявка не `ACCEPTED`).
+
+---
+
+#### `GET /sessions` — Мои сессии
+
+**Auth:** Требуется JWT
+
+**Query params:** `page` (default `0`), `size` (default `20`, max `100`), `sort` (whitelist: `scheduledAt`, `createdAt`, `status`; default `scheduledAt,asc`)
+
+**Response:** `200 OK` — `PagedResponse<SessionResponse>`
+
+---
+
+#### `GET /sessions/{id}` — Сессия по ID
+
+**Auth:** Требуется JWT (только участник)
+
+**Response:** `200 OK` — `SessionResponse`. `403` если не участник, `404` если не найдена.
+
+---
+
+#### `PUT /sessions/{id}/reschedule` — Перенести сессию
+
+**Auth:** Требуется JWT (участник)
+
+**Request:**
+```json
+{
+  "newScheduledAt": "2026-06-02T15:00:00+03:00",
+  "durationMinutes": 90,
+  "reason": "Не успеваю по предыдущему слоту"
+}
+```
+
+| Поле | Тип | Обязательное | Валидация |
+|---|---|---|---|
+| `newScheduledAt` | string | да | `@Future` |
+| `durationMinutes` | number | да | 15–480 |
+| `reason` | string | нет | max 500 |
+
+**Response:** `200 OK` — `SessionResponse` со статусом `RESCHEDULED`, заполненный `rescheduleReason`.
+
+---
+
+#### `PUT /sessions/{id}/cancel` — Отменить сессию
+
+**Auth:** Требуется JWT (участник)
+
+**Request:** опционально
+```json
+{ "reason": "Не получится — заболел" }
+```
+
+**Response:** `200 OK` — `SessionResponse` со статусом `CANCELLED` (и опциональным `cancelReason`).
+
+---
+
+#### `PUT /sessions/{id}/complete` — Зафиксировать проведённую сессию
+
+**Auth:** Требуется JWT (участник)
+
+**Response:** `200 OK` — `SessionResponse` со статусом `COMPLETED`.
+
+> После `COMPLETED` сессии и `COMPLETED` заявки студент может оставить отзыв (`POST /reviews`).
+
+#### Жизненный цикл
+
+```
+SCHEDULED ─reschedule─→ RESCHEDULED ─complete─→ COMPLETED
+    │                       │
+    └─────── cancel ────────┴────→ CANCELLED
+```
+
+`NO_SHOW` — выставляется бэкендом, если время прошло, а сессию никто не пометил `COMPLETED`/`CANCELLED` (фоновый процесс).
+
+---
+
+### 4.16 Notification Preferences
+
+Каждый пользователь может настроить, какие email-уведомления получать. По умолчанию все флаги `true`. Доставка идёт через outbox-таблицу с retry — local-инстанс перехватывает письма в MailHog (`http://localhost:8025`).
+
+#### `GET /profile/me/notifications` — Текущие настройки
+
+**Auth:** Требуется JWT
+
+**Response:** `200 OK`
+```json
+{
+  "emailRequestEvents": true,
+  "emailSessionEvents": true,
+  "emailReviewEvents": false
+}
+```
+
+| Поле | Описание |
+|---|---|
+| `emailRequestEvents` | События по заявкам менторинга (создана, принята, отклонена) |
+| `emailSessionEvents` | События по календарным сессиям (создана, перенесена, отменена) |
+| `emailReviewEvents` | События по отзывам (новый отзыв на ментора) |
+
+---
+
+#### `PUT /profile/me/notifications` — Обновить настройки
+
+**Auth:** Требуется JWT
+
+**Request:** любое подмножество флагов (`null` поля игнорируются — частичный апдейт)
+```json
+{ "emailRequestEvents": false }
+```
+
+| Поле | Тип | Обязательное | Описание |
+|---|---|---|---|
+| `emailRequestEvents` | boolean \| null | нет | `null` = не менять |
+| `emailSessionEvents` | boolean \| null | нет | `null` = не менять |
+| `emailReviewEvents` | boolean \| null | нет | `null` = не менять |
+
+**Response:** `200 OK` — `NotificationPreferencesResponse` (актуальный набор).
+
+---
+
+### 4.17 Complaints
+
+Любой авторизованный пользователь может пожаловаться на отзыв или другого пользователя. Жалобы обрабатываются администратором (см. 4.18).
+
+#### `POST /complaints` — Подать жалобу
+
+**Auth:** Требуется JWT
+
+**Request:**
+```json
+{
+  "targetType": "REVIEW",
+  "targetId": 42,
+  "reason": "В отзыве оскорбления и нецензурная лексика"
+}
+```
+
+| Поле | Тип | Обязательное | Значения |
+|---|---|---|---|
+| `targetType` | string | да | `REVIEW` (жалоба на отзыв), `USER` (жалоба на пользователя) |
+| `targetId` | number | да | ID отзыва или пользователя |
+| `reason` | string | да | `@NotBlank`, max 2000 символов |
+
+**Response:** `201 Created` — `ComplaintResponse`
+```json
+{
+  "id": 7,
+  "targetType": "REVIEW",
+  "targetId": 42,
+  "reporterUserId": 1,
+  "reason": "В отзыве оскорбления...",
+  "status": "OPEN",
+  "resolution": null,
+  "resolvedBy": null,
+  "resolvedAt": null,
+  "createdAt": "2026-05-18T20:00:00+03:00"
+}
+```
+
+**Ошибки:** `404` если `targetId` не существует.
+
+---
+
+### 4.18 Admin: Moderation & Audit
+
+> Все эндпоинты требуют роль `ADMIN`. Действия (смена роли, модерация отзыва, разрешение жалобы) автоматически фиксируются в аудит-логе через события `RoleChangedAuditEvent` / `ReviewModeratedAuditEvent` / `ComplaintResolvedAuditEvent` после `AFTER_COMMIT`.
+
+#### `GET /admin/complaints` — Список жалоб
+
+**Query params:** `status` (`OPEN` / `RESOLVED` / `REJECTED`), `targetType` (`REVIEW` / `USER`), `page`, `size`, `sort` (whitelist: `createdAt`, `status`, `resolvedAt`; default `createdAt,desc`).
+
+**Response:** `200 OK` — `PagedResponse<ComplaintResponse>`.
+
+---
+
+#### `PUT /admin/complaints/{id}/resolve` — Закрыть жалобу
+
+**Request:**
+```json
+{
+  "status": "RESOLVED",
+  "resolution": "Отзыв скрыт, нарушитель предупреждён"
+}
+```
+
+| Поле | Тип | Обязательное | Значения |
+|---|---|---|---|
+| `status` | string | да | `RESOLVED` или `REJECTED` |
+| `resolution` | string | нет | max 2000 символов |
+
+**Response:** `200 OK` — `ComplaintResponse` со `status`, `resolvedBy`, `resolvedAt`, `resolution`.
+
+**Ошибки:** `404` (нет жалобы), `422` (жалоба уже закрыта).
+
+---
+
+#### `PUT /admin/reviews/{id}/moderate` — Модерация отзыва
+
+**Request:**
+```json
+{ "moderationStatus": "HIDDEN" }
+```
+
+| Поле | Тип | Значения |
+|---|---|---|
+| `moderationStatus` | string | `VISIBLE`, `HIDDEN`, `UNDER_REVIEW` |
+
+**Response:** `200 OK` — `ReviewResponse` с обновлёнными `moderationStatus`, `moderatedBy`, `moderatedAt`. Скрытые отзывы исчезают из публичных списков и не учитываются в среднем рейтинге ментора.
+
+---
+
+#### `GET /admin/audit` — Аудит-лог
+
+**Query params:**
+| Параметр | Тип | Описание |
+|---|---|---|
+| `action` | string | Фильтр по типу действия (`ROLE_CHANGED`, `REVIEW_MODERATED`, `COMPLAINT_RESOLVED`) |
+| `adminUserId` | number | Фильтр по администратору |
+| `from` | string (ISO datetime) | С какого момента |
+| `to` | string (ISO datetime) | По какой момент |
+| `page` | number | default `0` |
+| `size` | number | default `20`, max `100` |
+| `sort` | string | whitelist: `createdAt`, `action`; default `createdAt,desc` |
+
+**Response:** `200 OK` — `PagedResponse<AuditLogResponse>`
+```json
+{
+  "content": [
+    {
+      "id": 15,
+      "adminUserId": 99,
+      "action": "REVIEW_MODERATED",
+      "targetType": "REVIEW",
+      "targetId": 42,
+      "payload": "{\"adminUserId\":99,\"reviewId\":42,\"newStatus\":\"HIDDEN\"}",
+      "createdAt": "2026-05-18T20:10:00+03:00"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true
+}
+```
+
+`payload` — это JSON-строка (Jackson сериализовал событие в `jsonb`-колонку), фронт распарсит через `JSON.parse(payload)`.
+
+---
+
+#### `GET /admin/notifications/outbox` — Outbox писем
+
+Просмотр состояния очереди исходящих email-уведомлений.
+
+**Query params:** `status` (`PENDING` / `SENT` / `FAILED`), `page` (default `0`), `size` (default `50`).
+
+**Response:** `200 OK` — `PagedResponse<OutboxEntryResponse>`
+```json
+{
+  "content": [
+    {
+      "id": 1001,
+      "recipientEmail": "student@example.com",
+      "subject": "Заявка принята",
+      "eventType": "request.accepted",
+      "status": "SENT",
+      "attempts": 1,
+      "lastError": null,
+      "nextAttemptAt": null,
+      "sentAt": "2026-05-18T20:05:00+03:00",
+      "createdAt": "2026-05-18T20:04:55+03:00"
+    }
+  ]
+}
+```
+
+`FAILED` появляется после исчерпания `app.notifications.outbox.max-attempts` (default 5). `nextAttemptAt` — когда шедулер попробует переотправить `PENDING`-запись.
 
 ---
 
@@ -2122,6 +2451,122 @@ interface ReviewResponse {
   mentorUserId: number;
   rating: number;               // 1..5
   comment: string | null;
+  moderationStatus: 'VISIBLE' | 'HIDDEN' | 'UNDER_REVIEW';
+  createdAt: string;
+}
+
+interface ModerateReviewRequest {
+  moderationStatus: 'VISIBLE' | 'HIDDEN' | 'UNDER_REVIEW';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Mentoring Sessions (4.15)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface CreateSessionRequest {
+  mentoringRequestId: number;
+  scheduledAt: string;          // OffsetDateTime, @Future
+  durationMinutes: number;      // 15..480
+}
+
+interface RescheduleSessionRequest {
+  newScheduledAt: string;       // OffsetDateTime, @Future
+  durationMinutes: number;      // 15..480
+  reason?: string | null;       // max 500
+}
+
+interface CancelSessionRequest {
+  reason?: string | null;       // max 500
+}
+
+interface SessionResponse {
+  id: number;
+  mentoringRequestId: number;
+  studentUserId: number;
+  mentorUserId: number;
+  studentName: string;
+  mentorName: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  status: 'SCHEDULED' | 'RESCHEDULED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  cancelReason: string | null;
+  rescheduleReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Notification Preferences (4.16)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface NotificationPreferencesResponse {
+  emailRequestEvents: boolean;
+  emailSessionEvents: boolean;
+  emailReviewEvents: boolean;
+}
+
+interface UpdateNotificationPreferencesRequest {
+  emailRequestEvents?: boolean | null;
+  emailSessionEvents?: boolean | null;
+  emailReviewEvents?: boolean | null;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Complaints (4.17, 4.18)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface CreateComplaintRequest {
+  targetType: 'REVIEW' | 'USER';
+  targetId: number;
+  reason: string;               // @NotBlank, max 2000
+}
+
+interface ResolveComplaintRequest {
+  status: 'RESOLVED' | 'REJECTED';
+  resolution?: string | null;   // max 2000
+}
+
+interface ComplaintResponse {
+  id: number;
+  targetType: 'REVIEW' | 'USER';
+  targetId: number;
+  reporterUserId: number;
+  reason: string;
+  status: 'OPEN' | 'RESOLVED' | 'REJECTED';
+  resolution: string | null;
+  resolvedBy: number | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Admin Audit Log (4.18)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface AuditLogResponse {
+  id: number;
+  adminUserId: number;
+  action: 'ROLE_CHANGED' | 'REVIEW_MODERATED' | 'COMPLAINT_RESOLVED';
+  targetType: string;           // 'USER' | 'REVIEW' | 'COMPLAINT'
+  targetId: number | null;
+  payload: string | null;       // JSON-строка; парсить через JSON.parse
+  createdAt: string;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Notification Outbox (4.18)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+interface OutboxEntryResponse {
+  id: number;
+  recipientEmail: string;
+  subject: string;
+  eventType: string;            // 'request.accepted' | 'session.created' | ...
+  status: 'PENDING' | 'SENT' | 'FAILED';
+  attempts: number;
+  lastError: string | null;
+  nextAttemptAt: string | null;
+  sentAt: string | null;
   createdAt: string;
 }
 
@@ -2356,6 +2801,55 @@ type FileStatus = 'ACTIVE' | 'DELETED';
 | `EMAIL_NOT_CONFIRMED` | Email не подтверждён |
 | `BLOCKED` | Заблокирован |
 | `DELETED` | Удалён (soft delete) |
+
+### MentoringSessionStatus
+
+| Значение | Описание |
+|---|---|
+| `SCHEDULED` | Сессия создана и запланирована |
+| `RESCHEDULED` | Перенесена (заполнен `rescheduleReason`) |
+| `COMPLETED` | Проведена |
+| `CANCELLED` | Отменена участником (заполнен `cancelReason`) |
+| `NO_SHOW` | Время прошло, никто не пометил `COMPLETED`/`CANCELLED` |
+
+### ReviewModerationStatus
+
+| Значение | Описание |
+|---|---|
+| `VISIBLE` | Виден публично, учитывается в среднем рейтинге |
+| `HIDDEN` | Скрыт администратором, исключён из публичных списков и из рейтинга |
+| `UNDER_REVIEW` | На модерации, временно скрыт |
+
+### ComplaintStatus
+
+| Значение | Описание |
+|---|---|
+| `OPEN` | Жалоба создана, ждёт админа |
+| `RESOLVED` | Принята: контент скрыт / пользователь предупреждён |
+| `REJECTED` | Отклонена как необоснованная |
+
+### ComplaintTargetType
+
+| Значение | Описание |
+|---|---|
+| `REVIEW` | Жалоба на отзыв (`targetId` = `reviewId`) |
+| `USER` | Жалоба на пользователя (`targetId` = `userId`) |
+
+### AuditAction
+
+| Значение | Когда фиксируется |
+|---|---|
+| `ROLE_CHANGED` | `PUT /admin/users/{userId}/role` сменил роль |
+| `REVIEW_MODERATED` | `PUT /admin/reviews/{id}/moderate` поменял `moderationStatus` |
+| `COMPLAINT_RESOLVED` | `PUT /admin/complaints/{id}/resolve` закрыл жалобу |
+
+### NotificationOutboxStatus
+
+| Значение | Описание |
+|---|---|
+| `PENDING` | В очереди, ждёт следующего тика шедулера (`nextAttemptAt`) |
+| `SENT` | Письмо успешно отправлено (`sentAt` заполнен) |
+| `FAILED` | Исчерпан лимит попыток (`app.notifications.outbox.max-attempts`, default 5); `lastError` содержит причину |
 
 ---
 

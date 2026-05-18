@@ -2,16 +2,19 @@ package com.example.it.mentor.service;
 
 import com.example.it.mentor.dto.PagedResponse;
 import com.example.it.mentor.dto.review.CreateReviewRequest;
+import com.example.it.mentor.dto.review.ModerateReviewRequest;
 import com.example.it.mentor.dto.review.ReviewResponse;
 import com.example.it.mentor.entity.MentoringRequest;
 import com.example.it.mentor.entity.MentorProfile;
 import com.example.it.mentor.entity.Review;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.enums.MentoringRequestStatus;
+import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
+import com.example.it.mentor.event.audit.ReviewModeratedAuditEvent;
 import com.example.it.mentor.event.review.ReviewCreatedEvent;
 import com.example.it.mentor.mapper.ReviewMapper;
 import com.example.it.mentor.repository.MentoringRequestRepository;
@@ -24,6 +27,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.OffsetDateTime;
 
 /**
  * Сервис создания, просмотра и удаления отзывов о менторстве.
@@ -75,6 +80,7 @@ public class ReviewService {
                 .mentorUserId(mentorUserId)
                 .rating(dto.rating())
                 .comment(dto.comment())
+                .moderationStatus(ReviewModerationStatus.VISIBLE)
                 .build();
 
         review = reviewRepository.save(review);
@@ -115,8 +121,25 @@ public class ReviewService {
         MentorProfile mentorProfile = mentorProfileRepository.findById(mentorProfileId)
                 .orElseThrow(() -> new NotFoundException("Профиль ментора не найден: " + mentorProfileId));
         Long mentorUserId = mentorProfile.getUser().getId();
-        Page<Review> page = reviewRepository.findByMentorUserId(mentorUserId, pageable);
+        Page<Review> page = reviewRepository.findByMentorUserId(mentorUserId, ReviewModerationStatus.VISIBLE, pageable);
         return PagedResponse.from(page.map(mapper::toResponse));
+    }
+
+    @Transactional
+    public ReviewResponse moderate(Long reviewId, ModerateReviewRequest dto) {
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new NotFoundException("Отзыв не найден: " + reviewId));
+
+        User admin = userService.getCurrentUserEntity();
+        review.setModerationStatus(dto.moderationStatus());
+        review.setModeratedBy(admin.getId());
+        review.setModeratedAt(OffsetDateTime.now());
+
+        review = reviewRepository.save(review);
+        log.info("Отзыв модерирован: reviewId={}, moderationStatus={}, adminId={}",
+                review.getId(), dto.moderationStatus(), admin.getId());
+        eventPublisher.publishEvent(new ReviewModeratedAuditEvent(admin.getId(), review.getId(), dto.moderationStatus()));
+        return mapper.toResponse(review);
     }
 
     /**
