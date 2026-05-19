@@ -30,6 +30,8 @@
   - [4.16 Notification Preferences](#416-notification-preferences)
   - [4.17 Complaints](#417-complaints)
   - [4.18 Admin: Moderation & Audit](#418-admin-moderation--audit)
+  - [4.19 Admin: User Status (Stage 11)](#419-admin-user-status-stage-11)
+  - [4.20 Admin: Dictionary CRUD (Stage 11)](#420-admin-dictionary-crud-stage-11)
 - [5. TypeScript-типы (полная карта DTO)](#5-typescript-типы-полная-карта-dto)
 - [6. Enum-справочник](#6-enum-справочник)
 - [7. Загрузка файлов](#7-загрузка-файлов)
@@ -111,6 +113,15 @@ axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 ### Что делать при 401
 
 Токен истёк или невалиден. Очистить хранилище, перенаправить на `/login`.
+
+### JWT `tokenVersion` (Stage 11)
+
+Backend помещает в JWT claim `tv` — текущий `tokenVersion` пользователя. На каждом запросе `JwtAuthenticationFilter` сверяет `jwt.tv` с актуальным значением в БД. Когда админ блокирует/удаляет пользователя через `PUT /admin/users/{userId}/status`, `tokenVersion` инкрементится, и все ранее выписанные токены этого пользователя становятся невалидными мгновенно — фронт получит `401` на ближайшем запросе. После повторного логина в новом JWT будет уже актуальный `tv`. Возврат пользователя в `ACTIVE` (unblock) не возвращает `tokenVersion` назад — старые токены остаются мёртвыми.
+
+Что это значит для фронтенда:
+- Не пытайтесь продлевать JWT локально — единственный источник правды по `tv` это `/auth/login`.
+- На `401` всегда чистите хранилище и переводите пользователя на `/login` (даже если визуально «только что был залогинен»).
+- Если у вас есть SSE-сессия (`/chats/events`) — она тоже обвалится с `401`, переподключайтесь только после успешного логина.
 
 ---
 
@@ -1365,13 +1376,15 @@ fetchEventSource(`${BASE_URL}/chats/events`, {
 
 ### 4.10 Admin
 
-Все эндпоинты доступны только пользователям с ролью `ADMIN`.
+Все эндпоинты доступны только пользователям с ролью `ADMIN`. Тут собраны базовые админ-операции по пользователям. Дополнительно см. разделы 4.18 (модерация + аудит + outbox), 4.19 (управление статусом, Stage 11) и 4.20 (CRUD справочников, Stage 11).
 
 #### `PUT /admin/users/{userId}/role` — Назначить роль пользователю
 
 **Auth:** Требуется JWT (ADMIN)
 
-**Логика:** Роли `STUDENT` и `MENTOR` взаимоисключающие. Роль `ADMIN` назначить нельзя (422). При смене роли создаётся профиль нового типа (если нет).
+**Логика:** Роли `STUDENT` и `MENTOR` взаимоисключающие. Роль `ADMIN` назначить нельзя (422). При смене роли создаётся профиль нового типа (если нет). Кеш `userDetails` инвалидируется. Публикуется `RoleChangedAuditEvent` → запись в `admin_audit_log`.
+
+> **Внимание:** старый JWT остаётся технически валидным, но содержит старые роли. Пользователь должен **перелогиниться** для получения нового токена. Это отличается от смены статуса (см. раздел 4.19), где `tokenVersion` инвалидирует токен мгновенно.
 
 **Request:**
 ```json
@@ -1920,7 +1933,7 @@ SCHEDULED ─reschedule─→ RESCHEDULED ─complete─→ COMPLETED
 **Query params:**
 | Параметр | Тип | Описание |
 |---|---|---|
-| `action` | string | Фильтр по типу действия (`ROLE_CHANGED`, `REVIEW_MODERATED`, `COMPLAINT_RESOLVED`) |
+| `action` | string | Фильтр по типу действия (`ROLE_CHANGED`, `REVIEW_MODERATED`, `COMPLAINT_RESOLVED`, `USER_STATUS_CHANGED`, `DICTIONARY_CHANGED`) |
 | `adminUserId` | number | Фильтр по администратору |
 | `from` | string (ISO datetime) | С какого момента |
 | `to` | string (ISO datetime) | По какой момент |
@@ -1981,6 +1994,176 @@ SCHEDULED ─reschedule─→ RESCHEDULED ─complete─→ COMPLETED
 ```
 
 `FAILED` появляется после исчерпания `app.notifications.outbox.max-attempts` (default 5). `nextAttemptAt` — когда шедулер попробует переотправить `PENDING`-запись.
+
+---
+
+### 4.19 Admin: User Status (Stage 11)
+
+#### `PUT /admin/users/{userId}/status` — Сменить статус пользователя
+
+**Auth:** Требуется JWT (ADMIN)
+
+**Логика:**
+- Допустимые целевые статусы: `ACTIVE`, `BLOCKED`, `DELETED` (выход на `EMAIL_NOT_CONFIRMED` админ не делает).
+- При переходе в `BLOCKED` или `DELETED` `tokenVersion` инкрементится — все ранее выписанные JWT этого пользователя моментально становятся невалидными.
+- Кеш `userDetails` инвалидируется (`@CacheEvict`), чтобы новые запросы тут же увидели новый статус.
+- Публикуется `UserStatusChangedAuditEvent` → запись в `admin_audit_log` с `action = USER_STATUS_CHANGED`.
+- Возврат в `ACTIVE` (unblock) `tokenVersion` не уменьшает — старые токены остаются мертвы по дизайну.
+
+**Request:**
+```json
+{ "status": "BLOCKED" }
+```
+
+**Response:** `200 OK` (пустое тело)
+
+**Ошибки:**
+- `404` — пользователь не найден
+- `400` — недопустимый статус (например, `EMAIL_NOT_CONFIRMED`)
+- `422` — попытка заблокировать самого себя
+
+**TypeScript:**
+```typescript
+type UserStatus = 'ACTIVE' | 'BLOCKED' | 'DELETED' | 'EMAIL_NOT_CONFIRMED';
+
+async function changeUserStatus(userId: number, status: 'ACTIVE' | 'BLOCKED' | 'DELETED') {
+  return fetch(`${BASE_URL}/admin/users/${userId}/status`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+```
+
+---
+
+### 4.20 Admin: Dictionary CRUD (Stage 11)
+
+> Полный CRUD для четырёх справочников. Все эндпоинты требуют роль `ADMIN`. Возвращают записи **включая `active=false`** (в отличие от публичных `/dictionaries/**`, которые отдают только `active=true`). Каждая мутация инвалидирует кеш `dictionaries` и публикует `DictionaryChangedAuditEvent` (`AuditAction.DICTIONARY_CHANGED`).
+
+`{type}` ∈ {`cities`, `skills`, `languages`, `interaction-types`}
+
+#### Общая схема эндпоинтов
+
+| Метод | Путь | Назначение | Ответ |
+|---|---|---|---|
+| `GET` | `/admin/dictionaries/{type}` | Список всех записей справочника | `200 OK` — массив `{Type}Response` |
+| `POST` | `/admin/dictionaries/{type}` | Создать запись | `201 Created` — `{Type}Response` |
+| `PUT` | `/admin/dictionaries/{type}/{id}` | Обновить запись (включая `active`) | `200 OK` — `{Type}Response` |
+| `DELETE` | `/admin/dictionaries/{type}/{id}` | Soft delete (`active=false`) | `204 No Content` |
+| `PUT` | `/admin/dictionaries/{type}/{id}/restore` | Восстановить (`active=true`) | `200 OK` — `{Type}Response` |
+
+**Правила уникальности:**
+- Имя уникально среди `active=true` записей (partial unique index `WHERE active = TRUE`).
+- После soft delete можно создать запись с тем же именем — старая просто остаётся в БД с `active=false`.
+- Для языков уникальность дополнительно по `code` среди активных.
+
+**Ошибки:**
+- `404` — запись с `id` не найдена.
+- `409` — `name` (или `code` у языков) занят активной записью.
+- `422` — нарушение бизнес-правила (например, попытка `DELETE` уже неактивной записи).
+
+#### Cities — `dict_city`
+
+**Поля:** `id`, `name` (≤150), `region` (≤150, optional), `country` (≤100), `active`.
+
+**Create / Update:**
+```json
+{ "name": "Минск", "region": "Минская область", "country": "Беларусь" }
+```
+*(в `UpdateCityRequest` дополнительно `"active": true|false`)*
+
+**Response (`CityResponse`):**
+```json
+{
+  "id": 17,
+  "name": "Минск",
+  "region": "Минская область",
+  "country": "Беларусь",
+  "active": true
+}
+```
+
+#### Skills — `dict_skill`
+
+**Поля:** `id`, `name` (≤150), `category` (≤100, optional), `active`.
+
+**Create / Update:**
+```json
+{ "name": "Spring Boot", "category": "Backend" }
+```
+
+**Response (`SkillResponse`):**
+```json
+{ "id": 42, "name": "Spring Boot", "category": "Backend", "active": true }
+```
+
+#### Languages — `dict_language`
+
+**Поля:** `id`, `name` (≤100), `code` (≤10, обязательно — ISO-639 рекомендован), `active`.
+
+**Create / Update:**
+```json
+{ "name": "Английский", "code": "en" }
+```
+
+**Response (`LanguageResponse`):**
+```json
+{ "id": 3, "name": "Английский", "code": "en", "active": true }
+```
+
+> Дополнительно `code` уникален среди активных записей.
+
+#### Interaction Types — `dict_interaction_type`
+
+**Поля:** `id`, `name` (≤150), `description` (text, optional), `active`.
+
+**Create / Update:**
+```json
+{ "name": "Видео-звонок", "description": "Сессии через Google Meet / Zoom" }
+```
+
+**Response (`InteractionTypeResponse`):**
+```json
+{
+  "id": 5,
+  "name": "Видео-звонок",
+  "description": "Сессии через Google Meet / Zoom",
+  "active": true
+}
+```
+
+#### Пример: типичная админ-таблица справочника (React)
+
+```typescript
+type SkillResponse = {
+  id: number; name: string; category: string | null; active: boolean;
+};
+
+async function loadSkills(): Promise<SkillResponse[]> {
+  const res = await fetch(`${BASE_URL}/admin/dictionaries/skills`, {
+    headers: { 'Authorization': `Bearer ${adminToken}` },
+  });
+  return res.json();
+}
+
+async function softDeleteSkill(id: number): Promise<void> {
+  await fetch(`${BASE_URL}/admin/dictionaries/skills/${id}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${adminToken}` },
+  });
+}
+
+async function restoreSkill(id: number): Promise<SkillResponse> {
+  const res = await fetch(`${BASE_URL}/admin/dictionaries/skills/${id}/restore`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${adminToken}` },
+  });
+  return res.json();
+}
+```
+
+> **Важно:** публичный `GET /dictionaries/{type}` (раздел 4.2) кеширован на 300 секунд (Caffeine, кеш `dictionaries`). После создания/обновления/удаления через админ-API кеш сбрасывается автоматически (`@CacheEvict`), но если фронт хранит словари локально, обновите свой кеш после изменений.
 
 ---
 
@@ -2062,27 +2245,42 @@ interface ProfileSummaryResponse {
 interface CityResponse {
   id: number;
   name: string;
-  region: string;
+  region: string | null;
   country: string;
+  active: boolean;          // публичный API возвращает только active=true; админский (/admin/dictionaries/cities) — все
 }
 
 interface SkillResponse {
   id: number;
   name: string;
-  category: string;
+  category: string | null;
+  active: boolean;
 }
 
 interface LanguageResponse {
   id: number;
   name: string;
   code: string;             // ISO 639-1: "en", "ru", "de"
+  active: boolean;
 }
 
 interface InteractionTypeResponse {
   id: number;
   name: string;
-  description: string;
+  description: string | null;
+  active: boolean;
 }
+
+// Admin Dictionary CRUD (Stage 11)
+
+interface CreateCityRequest        { name: string; region?: string | null; country: string; }
+interface UpdateCityRequest        { name: string; region?: string | null; country: string; active: boolean; }
+interface CreateSkillRequest       { name: string; category?: string | null; }
+interface UpdateSkillRequest       { name: string; category?: string | null; active: boolean; }
+interface CreateLanguageRequest    { name: string; code: string; }
+interface UpdateLanguageRequest    { name: string; code: string; active: boolean; }
+interface CreateInteractionTypeRequest { name: string; description?: string | null; }
+interface UpdateInteractionTypeRequest { name: string; description?: string | null; active: boolean; }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Student Profile
@@ -2613,10 +2811,15 @@ interface AdminRoleRequest {
   role: 'STUDENT' | 'MENTOR';
 }
 
+// Stage 11
+interface AdminUserStatusRequest {
+  status: 'ACTIVE' | 'BLOCKED' | 'DELETED';
+}
+
 interface AdminUserResponse {
   id: number;
   email: string;
-  status: string;
+  status: string;                    // UserStatus как строка
   roles: string[];
   firstName: string | null;
   lastName: string | null;
@@ -2842,6 +3045,10 @@ type FileStatus = 'ACTIVE' | 'DELETED';
 | `ROLE_CHANGED` | `PUT /admin/users/{userId}/role` сменил роль |
 | `REVIEW_MODERATED` | `PUT /admin/reviews/{id}/moderate` поменял `moderationStatus` |
 | `COMPLAINT_RESOLVED` | `PUT /admin/complaints/{id}/resolve` закрыл жалобу |
+| `USER_STATUS_CHANGED` | `PUT /admin/users/{userId}/status` сменил статус (Stage 11) |
+| `DICTIONARY_CHANGED` | Любая мутация `/admin/dictionaries/**` — create/update/deactivate/restore (Stage 11) |
+
+> `AuditLogResponse.payload` — это JSON-строка (Jackson сериализовал событие в `jsonb`-колонку). Распарсите `JSON.parse(payload)` чтобы получить `{adminUserId, ..., operation, dictionaryType, entityId, ...}`.
 
 ### NotificationOutboxStatus
 
@@ -2850,6 +3057,26 @@ type FileStatus = 'ACTIVE' | 'DELETED';
 | `PENDING` | В очереди, ждёт следующего тика шедулера (`nextAttemptAt`) |
 | `SENT` | Письмо успешно отправлено (`sentAt` заполнен) |
 | `FAILED` | Исчерпан лимит попыток (`app.notifications.outbox.max-attempts`, default 5); `lastError` содержит причину |
+
+### DictionaryType (Stage 11)
+
+| Значение | Соответствующий путь |
+|---|---|
+| `CITY` | `/admin/dictionaries/cities` |
+| `SKILL` | `/admin/dictionaries/skills` |
+| `LANGUAGE` | `/admin/dictionaries/languages` |
+| `INTERACTION_TYPE` | `/admin/dictionaries/interaction-types` |
+
+Появляется в payload `DictionaryChangedAuditEvent`.
+
+### DictionaryOperation (Stage 11)
+
+| Значение | Описание |
+|---|---|
+| `CREATE` | Создание записи (`POST`) |
+| `UPDATE` | Обновление записи (`PUT /{id}`) |
+| `DEACTIVATE` | Soft delete (`DELETE /{id}` → `active=false`) |
+| `RESTORE` | Восстановление (`PUT /{id}/restore` → `active=true`) |
 
 ---
 
@@ -3359,4 +3586,26 @@ function parseValidationDetails(details: string[]): Record<string, string> {
 
 ### Q: После смены роли через `/admin/users/{id}/role` старый токен перестаёт работать?
 
-**A:** Нет, старый JWT технически валиден до истечения срока (24 часа). Однако он содержит старые роли. Для получения JWT с новыми ролями пользователю нужно **повторно залогиниться** через `POST /auth/login`.
+**A:** Нет, старый JWT технически валиден до истечения срока (24 часа). Однако он содержит старые роли. Для получения JWT с новыми ролями пользователю нужно **повторно залогиниться** через `POST /auth/login`. Кеш `userDetails` инвалидируется при смене роли.
+
+---
+
+### Q: А после блокировки через `/admin/users/{id}/status` (Stage 11)?
+
+**A:** Да, токен моментально становится невалидным. При переходе в `BLOCKED` или `DELETED` backend инкрементит `User.tokenVersion`, который зашит в claim `tv` каждого JWT. На ближайшем запросе фронт получит `401`. Это поведение отличается от `ROLE_CHANGED` — там токен остаётся технически валидным со старыми ролями.
+
+Возврат в `ACTIVE` (unblock) **не возвращает** `tokenVersion` назад — пользователь обязан перелогиниться. На фронте: на `401` всегда чистите хранилище и редиректьте на `/login`.
+
+---
+
+### Q: Чем отличается публичный `GET /dictionaries/{type}` от админского `GET /admin/dictionaries/{type}`?
+
+**A:**
+| | Публичный `/dictionaries/{type}` | Админский `/admin/dictionaries/{type}` |
+|---|---|---|
+| Доступ | Без токена | JWT с ролью `ADMIN` |
+| Видны записи | Только `active = true` | **Все**, включая `active = false` |
+| Кеш | Caffeine 300 сек | Без кеша |
+| Поле `active` в ответе | Всегда `true` | Реальное значение |
+
+После CRUD-мутации админом кеш `dictionaries` сбрасывается, поэтому на ближайшем публичном `GET` фронт увидит обновлённые данные.

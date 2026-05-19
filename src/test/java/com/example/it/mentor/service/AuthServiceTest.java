@@ -201,7 +201,7 @@ class AuthServiceTest {
 
             when(userService.findByEmail("user@example.com")).thenReturn(user);
             when(passwordEncoder.matches("password123", user.getPasswordHash())).thenReturn(true);
-            when(jwtProvider.generateToken("user@example.com")).thenReturn("jwt-token");
+            when(jwtProvider.generateToken("user@example.com", 0L)).thenReturn("jwt-token");
             when(authMapper.toUserInfoResponse(user)).thenReturn(userInfo);
 
             var result = authService.login(request);
@@ -220,7 +220,7 @@ class AuthServiceTest {
 
             when(userService.findByEmail("user@example.com")).thenReturn(user);
             when(passwordEncoder.matches("password123", user.getPasswordHash())).thenReturn(true);
-            when(jwtProvider.generateToken("user@example.com")).thenReturn("token");
+            when(jwtProvider.generateToken("user@example.com", 0L)).thenReturn("token");
             when(authMapper.toUserInfoResponse(user)).thenReturn(
                     new UserInfoResponse(1L, "user@example.com", List.of("STUDENT"), "ACTIVE"));
 
@@ -276,13 +276,13 @@ class AuthServiceTest {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             when(userService.findByEmail("user@example.com")).thenReturn(user);
             when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
-            when(jwtProvider.generateToken("user@example.com")).thenReturn("token");
+            when(jwtProvider.generateToken("user@example.com", 0L)).thenReturn("token");
             when(authMapper.toUserInfoResponse(user)).thenReturn(
                     new UserInfoResponse(1L, "user@example.com", List.of("STUDENT"), "ACTIVE"));
 
             authService.login(new LoginRequest("user@example.com", "password123"));
 
-            verify(jwtProvider).generateToken("user@example.com");
+            verify(jwtProvider).generateToken("user@example.com", 0L);
         }
     }
 

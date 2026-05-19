@@ -1,5 +1,6 @@
 package com.example.it.mentor.security;
 
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -40,19 +41,43 @@ public class JwtProvider {
     }
 
     /**
-     * Генерирует JWT-токен для указанного пользователя.
+     * Генерирует JWT-токен с tokenVersion claim для мгновенной инвалидации сессий.
      *
-     * @param username email пользователя, который будет записан в subject токена
+     * @param username     email пользователя
+     * @param tokenVersion текущая версия токена из БД
      * @return подписанный компактный JWT-токен
      */
-    public String generateToken(String username) {
+    public String generateToken(String username, Long tokenVersion) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(username)
+                .claim("tv", tokenVersion)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + expirationMs))
                 .signWith(key)
                 .compact();
+    }
+
+    /**
+     * Извлекает tokenVersion из claim 'tv'. Возвращает null для legacy токенов без этого claim.
+     *
+     * @param token JWT-токен
+     * @return tokenVersion или null если claim отсутствует (legacy токен)
+     */
+    public Long extractTokenVersion(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        Object tv = claims.get("tv");
+        if (tv == null) {
+            return null;
+        }
+        if (tv instanceof Number n) {
+            return n.longValue();
+        }
+        throw new IllegalArgumentException("Невалидный claim tv: " + tv);
     }
 
     /**

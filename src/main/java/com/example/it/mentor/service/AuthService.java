@@ -112,7 +112,7 @@ public class AuthService {
             throw new UnauthorizedException("Аккаунт заблокирован");
         }
 
-        String token = jwtProvider.generateToken(user.getEmail());
+        String token = jwtProvider.generateToken(user.getEmail(), user.getTokenVersion());
 
         log.info("Успешный вход пользователя: {}", email);
         return new LoginResponse(token, "Bearer", authMapper.toUserInfoResponse(user));

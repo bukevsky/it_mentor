@@ -16,4 +16,10 @@ public interface DictLanguageRepository extends JpaRepository<DictLanguage, Long
      * @return список активных языков
      */
     List<DictLanguage> findByActiveTrueOrderByNameAsc();
+
+    List<DictLanguage> findAllByOrderByNameAsc();
+
+    boolean existsByNameIgnoreCaseAndActiveTrue(String name);
+
+    boolean existsByCodeAndActiveTrue(String code);
 }

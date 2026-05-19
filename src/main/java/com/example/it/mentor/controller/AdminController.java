@@ -1,6 +1,7 @@
 package com.example.it.mentor.controller;
 
 import com.example.it.mentor.dto.AdminRoleRequest;
+import com.example.it.mentor.dto.AdminUserStatusRequest;
 import com.example.it.mentor.dto.PagedResponse;
 import com.example.it.mentor.dto.admin.AdminUserResponse;
 import com.example.it.mentor.dto.admin.AdminUsersStatsResponse;
@@ -35,6 +36,13 @@ public class AdminController {
     public ResponseEntity<Void> assignRole(@PathVariable Long userId,
                                            @Valid @RequestBody AdminRoleRequest request) {
         adminService.assignRole(userId, request.role());
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/users/{userId}/status")
+    public ResponseEntity<Void> changeUserStatus(@PathVariable Long userId,
+                                                 @Valid @RequestBody AdminUserStatusRequest request) {
+        adminService.changeUserStatus(userId, request.status());
         return ResponseEntity.ok().build();
     }
 

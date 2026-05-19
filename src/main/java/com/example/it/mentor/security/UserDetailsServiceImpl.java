@@ -47,13 +47,15 @@ public class UserDetailsServiceImpl implements UserDetailsService {
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getCode().name()))
                 .toList();
 
-        boolean enabled = user.getStatus() != UserStatus.BLOCKED;
+        boolean enabled = user.getStatus() != UserStatus.BLOCKED
+                && user.getStatus() != UserStatus.DELETED;
 
         return new AppUserDetails(
                 user.getId(),
                 user.getEmail(),
                 user.getPasswordHash(),
                 enabled,
+                user.getTokenVersion(),
                 authorities
         );
     }

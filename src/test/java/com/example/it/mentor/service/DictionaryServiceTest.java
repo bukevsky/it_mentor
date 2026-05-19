@@ -49,7 +49,7 @@ class DictionaryServiceTest {
         @DisplayName("список городов → возвращает отмапленный список, сортировку делегирует репозиторию")
         void happyPath_shouldReturnMappedList() {
             var city = DictCity.builder().name("Москва").country("Россия").build();
-            var response = new CityResponse(1L, "Москва", null, "Россия");
+            var response = new CityResponse(1L, "Москва", null, "Россия", true);
 
             when(cityRepository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(city));
             when(dictionaryMapper.toCityResponses(List.of(city))).thenReturn(List.of(response));
@@ -72,9 +72,9 @@ class DictionaryServiceTest {
                     DictCity.builder().name("Санкт-Петербург").build()
             );
             var responses = List.of(
-                    new CityResponse(1L, "Казань", null, null),
-                    new CityResponse(2L, "Москва", null, null),
-                    new CityResponse(3L, "Санкт-Петербург", null, null)
+                    new CityResponse(1L, "Казань", null, null, true),
+                    new CityResponse(2L, "Москва", null, null, true),
+                    new CityResponse(3L, "Санкт-Петербург", null, null, true)
             );
 
             when(cityRepository.findByActiveTrueOrderByNameAsc()).thenReturn(cities);
@@ -122,7 +122,7 @@ class DictionaryServiceTest {
         @DisplayName("список навыков → возвращает отмапленный список с именем и категорией")
         void happyPath_shouldReturnMappedList() {
             var skill = DictSkill.builder().name("Java").category("Backend").build();
-            var response = new SkillResponse(1L, "Java", "Backend");
+            var response = new SkillResponse(1L, "Java", "Backend", true);
 
             when(skillRepository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(skill));
             when(dictionaryMapper.toSkillResponses(List.of(skill))).thenReturn(List.of(response));
@@ -144,9 +144,9 @@ class DictionaryServiceTest {
                     DictSkill.builder().name("Kotlin").category("Backend").build()
             );
             var responses = List.of(
-                    new SkillResponse(1L, "Java", "Backend"),
-                    new SkillResponse(2L, "React", "Frontend"),
-                    new SkillResponse(3L, "Kotlin", "Backend")
+                    new SkillResponse(1L, "Java", "Backend", true),
+                    new SkillResponse(2L, "React", "Frontend", true),
+                    new SkillResponse(3L, "Kotlin", "Backend", true)
             );
 
             when(skillRepository.findByActiveTrueOrderByNameAsc()).thenReturn(skills);
@@ -182,7 +182,7 @@ class DictionaryServiceTest {
         @DisplayName("список языков → возвращает отмапленный список с кодом языка")
         void happyPath_shouldReturnMappedListWithCode() {
             var language = DictLanguage.builder().name("Английский").code("en").build();
-            var response = new LanguageResponse(1L, "Английский", "en");
+            var response = new LanguageResponse(1L, "Английский", "en", true);
 
             when(languageRepository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(language));
             when(dictionaryMapper.toLanguageResponses(List.of(language))).thenReturn(List.of(response));
@@ -204,9 +204,9 @@ class DictionaryServiceTest {
                     DictLanguage.builder().name("Русский").code("ru").build()
             );
             var responses = List.of(
-                    new LanguageResponse(1L, "Английский", "en"),
-                    new LanguageResponse(2L, "Немецкий", "de"),
-                    new LanguageResponse(3L, "Русский", "ru")
+                    new LanguageResponse(1L, "Английский", "en", true),
+                    new LanguageResponse(2L, "Немецкий", "de", true),
+                    new LanguageResponse(3L, "Русский", "ru", true)
             );
 
             when(languageRepository.findByActiveTrueOrderByNameAsc()).thenReturn(languages);
@@ -242,7 +242,7 @@ class DictionaryServiceTest {
         @DisplayName("список типов → возвращает отмапленный список с name и description")
         void happyPath_shouldReturnMappedListWithDescription() {
             var type = DictInteractionType.builder().name("Онлайн").description("Удалённый формат").build();
-            var response = new InteractionTypeResponse(1L, "Онлайн", "Удалённый формат");
+            var response = new InteractionTypeResponse(1L, "Онлайн", "Удалённый формат", true);
 
             when(interactionTypeRepository.findByActiveTrueOrderByNameAsc()).thenReturn(List.of(type));
             when(dictionaryMapper.toInteractionTypeResponses(List.of(type))).thenReturn(List.of(response));
@@ -263,8 +263,8 @@ class DictionaryServiceTest {
                     DictInteractionType.builder().name("Оффлайн").build()
             );
             var responses = List.of(
-                    new InteractionTypeResponse(1L, "Онлайн", null),
-                    new InteractionTypeResponse(2L, "Оффлайн", null)
+                    new InteractionTypeResponse(1L, "Онлайн", null, true),
+                    new InteractionTypeResponse(2L, "Оффлайн", null, true)
             );
 
             when(interactionTypeRepository.findByActiveTrueOrderByNameAsc()).thenReturn(types);

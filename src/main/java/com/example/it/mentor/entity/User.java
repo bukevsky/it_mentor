@@ -18,6 +18,10 @@ public class User extends BaseEntity {
     @Version
     private Long version;
 
+    @Builder.Default
+    @Column(name = "token_version", nullable = false)
+    private Long tokenVersion = 0L;
+
     @Column(nullable = false, length = 255)
     private String email;
 

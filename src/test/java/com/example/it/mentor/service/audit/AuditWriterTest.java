@@ -2,12 +2,17 @@ package com.example.it.mentor.service.audit;
 
 import com.example.it.mentor.entity.AdminAuditLog;
 import com.example.it.mentor.entity.RoleCode;
+import com.example.it.mentor.entity.UserStatus;
 import com.example.it.mentor.entity.enums.AuditAction;
 import com.example.it.mentor.entity.enums.ComplaintStatus;
+import com.example.it.mentor.entity.enums.DictionaryOperation;
+import com.example.it.mentor.entity.enums.DictionaryType;
 import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import com.example.it.mentor.event.audit.ComplaintResolvedAuditEvent;
+import com.example.it.mentor.event.audit.DictionaryChangedAuditEvent;
 import com.example.it.mentor.event.audit.ReviewModeratedAuditEvent;
 import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
+import com.example.it.mentor.event.audit.UserStatusChangedAuditEvent;
 import com.example.it.mentor.repository.AdminAuditLogRepository;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -75,6 +80,42 @@ class AuditWriterTest {
         AdminAuditLog saved = captor.getValue();
         assertThat(saved.getAction()).isEqualTo(AuditAction.COMPLAINT_RESOLVED);
         assertThat(saved.getTargetType()).isEqualTo("COMPLAINT");
+    }
+
+    @Test
+    @DisplayName("write_userStatusChanged — сохраняет запись с USER_STATUS_CHANGED и targetType USER")
+    void write_userStatusChanged_persistsWithTargetTypeUser() {
+        UserStatusChangedAuditEvent event = new UserStatusChangedAuditEvent(
+                1L, 5L, UserStatus.ACTIVE, UserStatus.BLOCKED);
+
+        auditWriter.write(event);
+
+        ArgumentCaptor<AdminAuditLog> captor = ArgumentCaptor.forClass(AdminAuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        AdminAuditLog saved = captor.getValue();
+        assertThat(saved.getAction()).isEqualTo(AuditAction.USER_STATUS_CHANGED);
+        assertThat(saved.getTargetType()).isEqualTo("USER");
+        assertThat(saved.getTargetId()).isEqualTo(5L);
+        assertThat(saved.getPayload()).contains("BLOCKED");
+        assertThat(saved.getPayload()).contains("ACTIVE");
+    }
+
+    @Test
+    @DisplayName("write_dictionaryChanged — сохраняет запись с prefixed targetType DICTIONARY_CITY")
+    void write_dictionaryChanged_persistsWithTargetTypePrefix() {
+        DictionaryChangedAuditEvent event = new DictionaryChangedAuditEvent(
+                1L, DictionaryType.CITY, 7L, DictionaryOperation.CREATE, "Калининград");
+
+        auditWriter.write(event);
+
+        ArgumentCaptor<AdminAuditLog> captor = ArgumentCaptor.forClass(AdminAuditLog.class);
+        verify(auditLogRepository).save(captor.capture());
+        AdminAuditLog saved = captor.getValue();
+        assertThat(saved.getAction()).isEqualTo(AuditAction.DICTIONARY_CHANGED);
+        assertThat(saved.getTargetType()).isEqualTo("DICTIONARY_CITY");
+        assertThat(saved.getTargetId()).isEqualTo(7L);
+        assertThat(saved.getPayload()).contains("Калининград");
+        assertThat(saved.getPayload()).contains("CREATE");
     }
 
     @Test

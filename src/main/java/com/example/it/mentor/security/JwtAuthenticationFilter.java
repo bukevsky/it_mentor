@@ -55,16 +55,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = extractToken(request);
             if (StringUtils.hasText(token) && jwtProvider.validateToken(token)) {
                 String email = jwtProvider.extractUsername(token);
-                UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+                AppUserDetails userDetails = (AppUserDetails) userDetailsService.loadUserByUsername(email);
 
-                if (userDetails.isEnabled()) {
-                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities()
-                    );
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                    if (userDetails instanceof AppUserDetails appUserDetails) {
-                        MDC.put(USER_ID_MDC_KEY, String.valueOf(appUserDetails.getUserId()));
+                if (!userDetails.isEnabled()) {
+                    log.warn("JWT отклонён: пользователь {} заблокирован или удалён", email);
+                } else {
+                    Long jwtTokenVersion = jwtProvider.extractTokenVersion(token);
+                    Long userTokenVersion = userDetails.getTokenVersion();
+                    boolean tokenVersionMatches = jwtTokenVersion == null
+                            ? userTokenVersion == 0L
+                            : jwtTokenVersion.equals(userTokenVersion);
+
+                    if (!tokenVersionMatches) {
+                        log.warn("JWT инвалидирован: пользователь {} обновил tokenVersion (jwt={}, db={})",
+                                email, jwtTokenVersion, userTokenVersion);
+                    } else {
+                        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities()
+                        );
+                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                        MDC.put(USER_ID_MDC_KEY, String.valueOf(userDetails.getUserId()));
                     }
                 }
             }

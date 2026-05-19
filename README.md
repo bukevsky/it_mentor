@@ -2,7 +2,7 @@
 
 **Платформа IT-менторинга** — веб-приложение для поиска и взаимодействия между IT-менторами и студентами.
 
-Студенты заполняют профиль, загружают резюме и находят менторов по навыкам. Менторы публикуют свои компетенции, управляют набором учеников и выстраивают менторские программы. Участники общаются в режиме реального времени через чат с SSE-событиями, оставляют отзывы и отслеживают прогресс на персональном дашборде.
+Студенты заполняют профиль, загружают резюме и находят менторов по навыкам. Менторы публикуют свои компетенции, управляют набором учеников и выстраивают менторские программы. Участники общаются в режиме реального времени через чат с SSE-событиями (с typing-индикатором и presence), договариваются о календарных сессиях, оставляют отзывы и отслеживают прогресс на персональном дашборде. Email-уведомления о ключевых событиях доставляются через outbox с retry и per-user preferences. Администраторы управляют ролями, статусами, справочниками, модерацией отзывов и жалобами; каждое такое действие фиксируется в JSONB-аудит-логе.
 
 ---
 
@@ -270,21 +270,44 @@ SSE-события: `chat.message.created`, `chat.read`, `chat.typing`, `presenc
 
 ### Администрирование (`/admin`)
 
+#### Пользователи и роли
+
 | Метод | Путь                                  | Доступ | Описание                                             |
 | :---- | :------------------------------------ | :----- | :--------------------------------------------------- |
-| `PUT` | `/admin/users/{userId}/role`          | ADMIN  | Назначить роль STUDENT или MENTOR                    |
+| `PUT` | `/admin/users/{userId}/role`          | ADMIN  | Назначить роль STUDENT или MENTOR (ADMIN недоступен) |
+| `PUT` | `/admin/users/{userId}/status`        | ADMIN  | Сменить статус (`ACTIVE` / `BLOCKED` / `DELETED`); инкрементит `tokenVersion` при BLOCK/DELETE |
 | `GET` | `/admin/users`                        | ADMIN  | Список пользователей с фильтрами (q, role, status)   |
 | `GET` | `/admin/users/stats`                  | ADMIN  | Статистика пользователей (по ролям и статусам)       |
+
+Query params для `/admin/users`: `q` (email / firstName / lastName, LIKE без регистра), `role`, `status`, `page`, `size`, `sort` (whitelist: `createdAt`, `email`, `status`; default `createdAt,desc`).
+
+#### Справочники (Dictionary CRUD)
+
+`{type}` ∈ {`cities`, `skills`, `languages`, `interaction-types`}. Возвращает все записи (включая `active=false`).
+
+| Метод    | Путь                                        | Доступ | Описание                                |
+| :------- | :------------------------------------------ | :----- | :-------------------------------------- |
+| `GET`    | `/admin/dictionaries/{type}`                | ADMIN  | Все записи справочника (включая неактивные) |
+| `POST`   | `/admin/dictionaries/{type}`                | ADMIN  | Создать запись (201)                    |
+| `PUT`    | `/admin/dictionaries/{type}/{id}`           | ADMIN  | Обновить запись (включая `active`)      |
+| `DELETE` | `/admin/dictionaries/{type}/{id}`           | ADMIN  | Soft delete (`active=false`), 204       |
+| `PUT`    | `/admin/dictionaries/{type}/{id}/restore`   | ADMIN  | Восстановить (`active=true`)            |
+
+После каждой операции вызывается `@CacheEvict` на `dictionaries`, и публикуется `DictionaryChangedAuditEvent` (`AuditAction.DICTIONARY_CHANGED`). Уникальность имени проверяется среди `active=true` записей: можно пересоздать запись с тем же названием после soft delete.
+
+#### Модерация и аудит
+
+| Метод | Путь                                  | Доступ | Описание                                             |
+| :---- | :------------------------------------ | :----- | :--------------------------------------------------- |
 | `GET` | `/admin/complaints`                   | ADMIN  | Список жалоб (фильтры `status`, `targetType`, пагинация) |
 | `PUT` | `/admin/complaints/{id}/resolve`      | ADMIN  | Разрешить жалобу: `status` (`RESOLVED` / `REJECTED`), `resolution` |
 | `PUT` | `/admin/reviews/{id}/moderate`        | ADMIN  | Модерация отзыва: `moderationStatus` (`VISIBLE` / `HIDDEN` / `UNDER_REVIEW`) |
 | `GET` | `/admin/audit`                        | ADMIN  | Аудит-лог: фильтры `action`, `adminUserId`, `from`, `to`, пагинация |
 | `GET` | `/admin/notifications/outbox`         | ADMIN  | Outbox писем: фильтр `status` (`PENDING` / `SENT` / `FAILED`) |
 
-Query params для `/admin/users`: `q`, `role`, `status`, `page`, `size`, `sort` (whitelist: `createdAt`, `email`, `status`).
 Sort whitelist `/admin/complaints`: `createdAt`, `status`, `resolvedAt`. Sort whitelist `/admin/audit`: `createdAt`, `action`.
 
-Модерация и разрешение жалоб публикуют события (`RoleChangedAuditEvent`, `ReviewModeratedAuditEvent`, `ComplaintResolvedAuditEvent`) → `AuditWriter` пишет запись в `admin_audit_log` через `@Transactional(REQUIRES_NEW)`, payload — JSONB.
+Все админ-действия (смена роли/статуса, модерация отзыва, разрешение жалобы, мутации справочников) публикуют sealed-event (`RoleChangedAuditEvent`, `UserStatusChangedAuditEvent`, `ReviewModeratedAuditEvent`, `ComplaintResolvedAuditEvent`, `DictionaryChangedAuditEvent`). `AuditWriter` сериализует payload Jackson'ом в JSONB и пишет запись в `admin_audit_log` через `@Transactional(REQUIRES_NEW)` — независимо от бизнес-транзакции.
 
 ---
 
@@ -317,11 +340,12 @@ com.example.it.mentor
 ├── controller/     Auth, Dictionary, StudentProfile, MentorProfile, Profile,
 │                   File, Mentoring, MentoringSession, Chat, Review, Complaint,
 │                   Admin, AdminReview, AdminComplaint, AdminAudit,
-│                   AdminNotification, NotificationPreferences, Dashboard,
-│                   MentorStats, Presence                       (~20 шт.)
-├── service/        Auth, User, Dictionary, StudentProfile, MentorProfile, Profile,
-│                   MentoringRequest, MentoringSession, Chat, ChatSse, Typing,
-│                   Review, Complaint, Admin, Dashboard, MentorStats, Presence,
+│                   AdminNotification, AdminDictionary, NotificationPreferences,
+│                   Dashboard, MentorStats, Presence            (21 шт.)
+├── service/        Auth, User, Dictionary, AdminDictionary, StudentProfile,
+│                   MentorProfile, Profile, MentoringRequest, MentoringSession,
+│                   Chat, ChatSse, Typing, Review, Complaint, Admin,
+│                   Dashboard, MentorStats, Presence,
 │                   NotificationPreferences, FileStorage(Service),
 │                   EmailService / LogEmailService / SmtpEmailService
 │   ├── audit/      AuditWriter, AdminAuditEventListener (sealed AuditEvent → JSONB)
@@ -329,7 +353,8 @@ com.example.it.mentor
 │                       NotificationEventListener (события заявок/сессий/отзывов)
 ├── repository/     Spring Data репозитории + MentorProfileSpecification (~25 шт.)
 ├── event/audit/    sealed AuditEvent: RoleChangedAuditEvent,
-│                   ReviewModeratedAuditEvent, ComplaintResolvedAuditEvent
+│                   ReviewModeratedAuditEvent, ComplaintResolvedAuditEvent,
+│                   UserStatusChangedAuditEvent, DictionaryChangedAuditEvent
 ├── entity/         BaseEntity, User, Role, UserStatus, RoleCode, PasswordResetToken,
 │                   StudentProfile + связанные сущности, MentorProfile + MentorSkill,
 │                   MentoringRequest, MentoringSession, Chat, ChatMessage,
@@ -342,7 +367,8 @@ com.example.it.mentor
 │                   MentoringDuration, MentoringRequestStatus,
 │                   MentoringRequestDirection, MentoringSessionStatus,
 │                   ReviewModerationStatus, ComplaintStatus,
-│                   ComplaintTargetType, AuditAction, NotificationOutboxStatus
+│                   ComplaintTargetType, AuditAction, NotificationOutboxStatus,
+│                   DictionaryType, DictionaryOperation
 ├── dto/            Java records: student/, mentor/, mentoring/, session/, chat/,
 │                   review/, complaint/, audit/, notification/, dict/,
 │                   dashboard/, admin/, presence/, sse/
@@ -370,7 +396,13 @@ Stateless JWT-аутентификация:
 
 1. Пользователь логинится через `POST /auth/login` — получает JWT.
 2. Токен передаётся в заголовке `Authorization: Bearer <token>`.
-3. `JwtAuthenticationFilter` валидирует токен при каждом запросе.
+3. `JwtAuthenticationFilter` валидирует токен и сверяет `tokenVersion` при каждом запросе.
+
+### Инвалидация JWT через `tokenVersion` (Stage 11)
+
+`User.tokenVersion` (`BIGINT NOT NULL DEFAULT 0`, миграция `027`) хранит «поколение» валидных токенов. При выписке токена `JwtProvider.generateToken(email, tokenVersion)` кладёт его в claim `tv`. На каждом запросе `JwtAuthenticationFilter` сравнивает `jwt.tv` с актуальным `user.tokenVersion`: при расхождении возвращает `401`. Legacy-токены (без `tv`) принимаются, пока пользователь имеет `tokenVersion == 0`.
+
+`AdminService.changeUserStatus` инкрементит `tokenVersion` при переходе в `BLOCKED` или `DELETED` и вызывает `UserDetailsServiceImpl.evictUserCache(email)` → все ранее выписанные токены становятся невалидными мгновенно. Возврат в `ACTIVE` (unblock) не откатывает `tokenVersion` — старые токены остаются мёртвыми.
 
 ### Публичные эндпоинты
 
@@ -418,22 +450,22 @@ GET /profiles/mentors/*/reviews
 ### ER-диаграмма (упрощённая)
 
 ```
-users ──< user_roles >── roles
+users (email, password_hash, status, token_version, is_deleted) ──< user_roles >── roles
   │
   ├── student_profiles ──< student_educations
-  │       ├──< student_languages >── dict_language
-  │       ├──< student_skills >── dict_skill
+  │       ├──< student_languages >── dict_language (active)
+  │       ├──< student_skills >── dict_skill (active)
   │       ├──< student_employment_types
   │       ├──< student_work_formats
-  │       └──── dict_city
+  │       └──── dict_city (active)
   │
-  ├── mentor_profiles ──< mentor_skills >── dict_skill
-  │       └──── dict_city
+  ├── mentor_profiles ──< mentor_skills >── dict_skill (active)
+  │       └──── dict_city (active)
   │
-  ├── stored_files (RESUME, PORTFOLIO, AVATAR, CHAT_ATTACHMENT)
+  ├── stored_files (RESUME, PORTFOLIO, AVATAR, CHAT_ATTACHMENT — status, file_type)
   │
-  ├── mentoring_requests (student_profile_id, mentor_profile_id)
-  │       ├──── reviews (mentoring_request_id, reviewer_user_id, mentor_user_id, moderation_status)
+  ├── mentoring_requests (student_profile_id, mentor_profile_id, direction, status)
+  │       ├──── reviews (mentoring_request_id UNIQUE, reviewer_user_id, mentor_user_id, moderation_status)
   │       └──< mentoring_sessions (scheduled_at, duration_minutes, status)
   │
   ├── chats ──< chat_messages (senderUserId, body, attachmentFileId)
@@ -445,6 +477,10 @@ users ──< user_roles >── roles
   │
   ├── complaints (target_type, target_id, reporter_user_id, status, resolved_by)
   └── admin_audit_log (admin_user_id, action, target_type, target_id, payload jsonb)
+
+dict_city / dict_skill / dict_language / dict_interaction_type — все имеют active BOOLEAN
+с partial unique index `WHERE active = TRUE`, что позволяет пересоздать запись
+с тем же именем после soft delete.
 ```
 
 ### Миграции
@@ -477,6 +513,8 @@ users ──< user_roles >── roles
 | `024_create_complaints.sql`                 | Таблица `complaints` + индексы                             |
 | `025_extend_reviews_moderation.sql`         | Колонки `moderation_status`, `moderated_by`, `moderated_at` в `reviews` |
 | `026_create_admin_audit_log.sql`            | `admin_audit_log` (JSONB payload, индексы по `action`/`createdAt`) |
+| `027_add_user_token_version.sql`            | Колонка `users.token_version BIGINT NOT NULL DEFAULT 0` для инвалидации JWT |
+| `028_extend_audit_action_check.sql`         | Расширяет CHECK-constraint `admin_audit_log.action`: `USER_STATUS_CHANGED`, `DICTIONARY_CHANGED` |
 
 ---
 
@@ -621,17 +659,17 @@ it.mentor/
 
 | Категория             | Количество |
 | :-------------------- | :--------- |
-| Тестов (JUnit 5)      | 309 IT + ~140 unit |
-| IT-тест классов       | ~25        |
-| Unit-тест классов     | ~25        |
-| REST-эндпоинтов       | ~80        |
-| SQL-миграций          | 26         |
+| Тестов (JUnit 5)      | 357 (`./mvnw clean verify` — BUILD SUCCESS) |
+| IT-тест классов       | ~28        |
+| Unit-тест классов     | ~28        |
+| REST-эндпоинтов       | ~105       |
+| SQL-миграций          | 28         |
 | Таблиц в БД           | ~28        |
-| Контроллеров          | ~20        |
-| Сервисов              | ~20        |
-| Репозиториев          | ~25        |
+| Контроллеров          | 21         |
+| Сервисов              | ~22        |
+| Репозиториев          | ~26        |
 | JPA-сущностей         | ~25        |
-| Перечислений (enum)   | ~20        |
+| Перечислений (enum)   | ~22        |
 
 ---
 
@@ -650,3 +688,6 @@ it.mentor/
 - [x] **Phase 2** — Typing events, user presence (online/offline)
 - [x] **Stage 10** — Календарные сессии менторинга (`/sessions/**`), email-уведомления (outbox + retry + per-user preferences)
 - [x] **Phase 4** — Admin Moderation & Audit: жалобы (`/complaints`, `/admin/complaints/**`), модерация отзывов (`/admin/reviews/{id}/moderate`), аудит-лог админ-действий (`/admin/audit`), просмотр email-outbox (`/admin/notifications/outbox`)
+- [x] **Stage 11** — Extended Admin Panel:
+  - **Подэтап A** — управление статусом пользователя (`PUT /admin/users/{userId}/status`) + JWT `tokenVersion` для мгновенной инвалидации токенов при `BLOCKED`/`DELETED`
+  - **Подэтап B** — полный CRUD справочников через `/admin/dictionaries/{type}/**` (cities, skills, languages, interaction-types) с soft delete (`active=false`), restore и аудит-событиями

@@ -1,11 +1,16 @@
 package com.example.it.mentor.service.audit;
 
 import com.example.it.mentor.entity.RoleCode;
+import com.example.it.mentor.entity.UserStatus;
 import com.example.it.mentor.entity.enums.ComplaintStatus;
+import com.example.it.mentor.entity.enums.DictionaryOperation;
+import com.example.it.mentor.entity.enums.DictionaryType;
 import com.example.it.mentor.entity.enums.ReviewModerationStatus;
 import com.example.it.mentor.event.audit.ComplaintResolvedAuditEvent;
+import com.example.it.mentor.event.audit.DictionaryChangedAuditEvent;
 import com.example.it.mentor.event.audit.ReviewModeratedAuditEvent;
 import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
+import com.example.it.mentor.event.audit.UserStatusChangedAuditEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +49,24 @@ class AdminAuditEventListenerTest {
     void onComplaintResolved_delegatesToWriter() {
         ComplaintResolvedAuditEvent event = new ComplaintResolvedAuditEvent(1L, 50L, ComplaintStatus.RESOLVED, null);
         listener.onComplaintResolved(event);
+        verify(auditWriter).write(event);
+    }
+
+    @Test
+    @DisplayName("onUserStatusChanged — делегирует в AuditWriter")
+    void onUserStatusChanged_delegatesToAuditWriter() {
+        UserStatusChangedAuditEvent event = new UserStatusChangedAuditEvent(
+                1L, 5L, UserStatus.ACTIVE, UserStatus.BLOCKED);
+        listener.onUserStatusChanged(event);
+        verify(auditWriter).write(event);
+    }
+
+    @Test
+    @DisplayName("onDictionaryChanged — делегирует в AuditWriter")
+    void onDictionaryChanged_delegatesToAuditWriter() {
+        DictionaryChangedAuditEvent event = new DictionaryChangedAuditEvent(
+                1L, DictionaryType.CITY, 7L, DictionaryOperation.CREATE, "Москва");
+        listener.onDictionaryChanged(event);
         verify(auditWriter).write(event);
     }
 }
