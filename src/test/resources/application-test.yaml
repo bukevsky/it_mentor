@@ -35,6 +35,15 @@ app:
       max-attempts: 5
       retry-delay-seconds: 60
       scan-cron: "0 */1 * * * *"
+  security:
+    rate-limit:
+      auth-per-minute: 10000
+
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
 
 logging:
   structured:

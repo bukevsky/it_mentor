@@ -22,8 +22,8 @@ public class PasswordResetToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(nullable = false, length = 6)
-    private String token;
+    @Column(name = "token_hash", nullable = false, length = 60)
+    private String tokenHash;
 
     @Column(nullable = false)
     private OffsetDateTime expiresAt;

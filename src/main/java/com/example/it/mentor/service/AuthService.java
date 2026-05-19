@@ -132,13 +132,12 @@ public class AuthService {
 
         // ifPresent — не раскрываем факт существования email: всегда возвращаем 200
         userService.findByEmailOptional(email).ifPresent(user -> {
-            // Аннулируем все старые активные коды для этого пользователя
             passwordResetTokenRepository.invalidateAllByUserId(user.getId());
 
             String otp = generateOtp();
             PasswordResetToken resetToken = PasswordResetToken.builder()
                     .user(user)
-                    .token(otp)
+                    .tokenHash(passwordEncoder.encode(otp))
                     .expiresAt(OffsetDateTime.now().plusMinutes(otpProperties.getExpirationMinutes()))
                     .build();
             passwordResetTokenRepository.save(resetToken);
@@ -168,14 +167,21 @@ public class AuthService {
         User user = userService.findByEmailOptional(email)
                 .orElseThrow(() -> new UnauthorizedException("Недействительный код сброса пароля"));
 
-        int updated = passwordResetTokenRepository.markTokenUsed(
-                user.getId(), request.code(), OffsetDateTime.now(), otpProperties.getMaxAttempts());
+        PasswordResetToken token = passwordResetTokenRepository
+                .findActiveByUserId(user.getId(), OffsetDateTime.now(), otpProperties.getMaxAttempts())
+                .orElseThrow(() -> new UnauthorizedException("Недействительный, истёкший или заблокированный код сброса пароля"));
 
-        if (updated == 0) {
-            passwordResetTokenRepository.incrementAttempts(user.getId(), request.code());
+        if (!passwordEncoder.matches(request.code(), token.getTokenHash())) {
+            token.setAttempts(token.getAttempts() + 1);
+            if (token.getAttempts() >= otpProperties.getMaxAttempts()) {
+                token.setUsed(true);
+            }
+            passwordResetTokenRepository.save(token);
             throw new UnauthorizedException("Недействительный, истёкший или заблокированный код сброса пароля");
         }
 
+        token.setUsed(true);
+        passwordResetTokenRepository.save(token);
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userService.save(user);
         log.info("Пароль успешно сброшен для пользователя: {}", user.getEmail());

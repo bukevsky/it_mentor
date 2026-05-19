@@ -293,11 +293,12 @@ class AuthServiceTest {
     class ForgotPassword {
 
         @Test
-        @DisplayName("существующий email → создаёт и сохраняет PasswordResetToken с 6-значным OTP")
+        @DisplayName("существующий email → сохраняет BCrypt-хеш OTP, не plain text")
         void existingEmail_shouldSaveResetToken() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
             when(otpProperties.getExpirationMinutes()).thenReturn(15);
+            when(passwordEncoder.encode(matches("\\d{6}"))).thenReturn("$2a$10$mockhash");
 
             authService.forgotPassword(new ForgotPasswordRequest("user@example.com"));
 
@@ -305,9 +306,9 @@ class AuthServiceTest {
             verify(passwordResetTokenRepository).save(tokenCaptor.capture());
 
             PasswordResetToken saved = tokenCaptor.getValue();
-            assertThat(saved.getToken())
-                    .as("Токен должен быть 6-значным числовым OTP")
-                    .matches("\\d{6}");
+            assertThat(saved.getTokenHash())
+                    .as("В БД должен храниться хеш OTP, не plain text")
+                    .isEqualTo("$2a$10$mockhash");
             assertThat(saved.getUser())
                     .as("Токен должен быть привязан к пользователю")
                     .isEqualTo(user);
@@ -371,15 +372,19 @@ class AuthServiceTest {
     class ResetPassword {
 
         @Test
-        @DisplayName("валидный код → пароль обновляется атомарно")
+        @DisplayName("валидный код → токен помечается использованным, пароль обновляется")
         void validCode_shouldUpdatePasswordAtomically() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             org.springframework.test.util.ReflectionTestUtils.setField(user, "id", 1L);
+            PasswordResetToken token = PasswordResetToken.builder()
+                    .user(user).tokenHash("$2a$10$storedHash")
+                    .expiresAt(OffsetDateTime.now().plusMinutes(15)).build();
 
             when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
             when(otpProperties.getMaxAttempts()).thenReturn(5);
-            when(passwordResetTokenRepository.markTokenUsed(eq(1L), eq("123456"), any(OffsetDateTime.class), eq(5)))
-                    .thenReturn(1);
+            when(passwordResetTokenRepository.findActiveByUserId(eq(1L), any(OffsetDateTime.class), eq(5)))
+                    .thenReturn(Optional.of(token));
+            when(passwordEncoder.matches("123456", "$2a$10$storedHash")).thenReturn(true);
             when(passwordEncoder.encode("NewPassword123")).thenReturn("$2a$new_hashed");
             when(userService.save(any())).thenReturn(user);
 
@@ -388,26 +393,32 @@ class AuthServiceTest {
             assertThat(user.getPasswordHash())
                     .as("Пароль пользователя должен обновиться")
                     .isEqualTo("$2a$new_hashed");
-            verify(passwordResetTokenRepository).markTokenUsed(eq(1L), eq("123456"), any(OffsetDateTime.class), eq(5));
+            assertThat(token.isUsed()).isTrue();
+            verify(passwordResetTokenRepository).save(token);
         }
 
         @Test
-        @DisplayName("недействительный/использованный/истёкший код → UnauthorizedException + увеличение attempts")
+        @DisplayName("неверный код → attempts увеличивается, пароль не меняется")
         void invalidCode_shouldThrowUnauthorizedAndIncrementAttempts() {
             var user = buildUser("user@example.com", UserStatus.ACTIVE);
             org.springframework.test.util.ReflectionTestUtils.setField(user, "id", 1L);
+            PasswordResetToken token = PasswordResetToken.builder()
+                    .user(user).tokenHash("$2a$10$storedHash")
+                    .expiresAt(OffsetDateTime.now().plusMinutes(15)).build();
 
             when(userService.findByEmailOptional("user@example.com")).thenReturn(Optional.of(user));
             when(otpProperties.getMaxAttempts()).thenReturn(5);
-            when(passwordResetTokenRepository.markTokenUsed(eq(1L), eq("000000"), any(OffsetDateTime.class), eq(5)))
-                    .thenReturn(0);
+            when(passwordResetTokenRepository.findActiveByUserId(eq(1L), any(OffsetDateTime.class), eq(5)))
+                    .thenReturn(Optional.of(token));
+            when(passwordEncoder.matches("000000", "$2a$10$storedHash")).thenReturn(false);
 
             assertThatThrownBy(() ->
                     authService.resetPassword(new ResetPasswordRequest("user@example.com", "000000", "NewPass123")))
                     .isInstanceOf(UnauthorizedException.class)
                     .hasMessageContaining("Недействительный");
 
-            verify(passwordResetTokenRepository).incrementAttempts(1L, "000000");
+            assertThat(token.getAttempts()).isEqualTo(1);
+            verify(passwordResetTokenRepository).save(token);
             verify(userService, never()).save(any());
         }
 
@@ -421,7 +432,7 @@ class AuthServiceTest {
                     .isInstanceOf(UnauthorizedException.class)
                     .hasMessageContaining("Недействительный код сброса пароля");
 
-            verify(passwordResetTokenRepository, never()).markTokenUsed(any(), any(), any(), anyInt());
+            verify(passwordResetTokenRepository, never()).findActiveByUserId(any(), any(), anyInt());
         }
     }
 

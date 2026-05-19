@@ -34,7 +34,8 @@ public class Chat extends BaseEntity {
     @Column(name = "last_sender_user_id")
     private Long lastSenderUserId;
 
-    @OneToMany(mappedBy = "chat", fetch = LAZY)
+    @OneToMany(mappedBy = "chat", fetch = LAZY,
+               cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<ChatMessage> messages = new HashSet<>();
 }

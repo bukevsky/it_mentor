@@ -77,6 +77,8 @@ http://localhost:8080/swagger-ui.html
 
 Для защищённых эндпоинтов нажмите **Authorize** и вставьте JWT-токен, полученный при логине.
 
+> **Примечание:** Swagger UI доступен только в профиле `local` (`@Profile("!prod")`). В prod-профиле `springdoc.swagger-ui.enabled=false`.
+
 ---
 
 ## Конфигурация
@@ -402,7 +404,11 @@ Stateless JWT-аутентификация:
 
 `User.tokenVersion` (`BIGINT NOT NULL DEFAULT 0`, миграция `027`) хранит «поколение» валидных токенов. При выписке токена `JwtProvider.generateToken(email, tokenVersion)` кладёт его в claim `tv`. На каждом запросе `JwtAuthenticationFilter` сравнивает `jwt.tv` с актуальным `user.tokenVersion`: при расхождении возвращает `401`. Legacy-токены (без `tv`) принимаются, пока пользователь имеет `tokenVersion == 0`.
 
-`AdminService.changeUserStatus` инкрементит `tokenVersion` при переходе в `BLOCKED` или `DELETED` и вызывает `UserDetailsServiceImpl.evictUserCache(email)` → все ранее выписанные токены становятся невалидными мгновенно. Возврат в `ACTIVE` (unblock) не откатывает `tokenVersion` — старые токены остаются мёртвыми.
+`AdminService.changeUserStatus` инкрементит `tokenVersion` при переходе в `BLOCKED` или `DELETED` и вызывает `UserDetailsServiceImpl.evictUserCache(email)` → все ранее выписанные токены становятся невалидными мгновенно. `AdminService.assignRole` также инкрементит `tokenVersion` при смене роли — пользователь обязан перелогиниться, чтобы получить JWT с новыми authorities. Возврат в `ACTIVE` (unblock) не откатывает `tokenVersion` — старые токены остаются мёртвыми.
+
+### Rate Limiting
+
+`RateLimitFilter` применяет ограничение к публичным auth-эндпоинтам: `POST /auth/login`, `POST /auth/password/forgot`, `POST /auth/password/reset`. Лимит — **10 запросов в минуту с одного IP**. При превышении возвращается `429 Too Many Requests`. Настройка через `app.security.rate-limit.auth-per-minute`.
 
 ### Публичные эндпоинты
 
@@ -515,6 +521,9 @@ dict_city / dict_skill / dict_language / dict_interaction_type — все име
 | `026_create_admin_audit_log.sql`            | `admin_audit_log` (JSONB payload, индексы по `action`/`createdAt`) |
 | `027_add_user_token_version.sql`            | Колонка `users.token_version BIGINT NOT NULL DEFAULT 0` для инвалидации JWT |
 | `028_extend_audit_action_check.sql`         | Расширяет CHECK-constraint `admin_audit_log.action`: `USER_STATUS_CHANGED`, `DICTIONARY_CHANGED` |
+| `029_otp_hash_password_reset_token.sql`     | Замена колонки `code` на `token_hash VARCHAR(60)` (BCrypt) в `password_reset_tokens` |
+| `030_add_audit_target_index.sql`            | Индекс `idx_audit_target ON admin_audit_log(target_type, target_id, created_at DESC)` |
+| `031_extend_seed_dict_data.sql`             | Расширенные seed-данные: 79 городов (РФ, СНГ, Европа, США/Канада), 120+ навыков (AI/ML, Go, Rust, DevOps, Data, Architecture и др.), 28 языков, 15 типов взаимодействия |
 
 ---
 
@@ -643,7 +652,7 @@ it.mentor/
 │       ├── application-test.yaml
 │       └── db/changelog/
 │           ├── db.changelog-master.yaml
-│           └── changes/               (20 SQL-миграций)
+│           └── changes/               (31 SQL-миграций)
 │
 └── src/test/java/com/example/it/mentor/
     ├── ApplicationTests.java
@@ -659,11 +668,11 @@ it.mentor/
 
 | Категория             | Количество |
 | :-------------------- | :--------- |
-| Тестов (JUnit 5)      | 357 (`./mvnw clean verify` — BUILD SUCCESS) |
+| Тестов (JUnit 5)      | 362 (`./mvnw clean verify` — BUILD SUCCESS) |
 | IT-тест классов       | ~28        |
 | Unit-тест классов     | ~28        |
 | REST-эндпоинтов       | ~105       |
-| SQL-миграций          | 28         |
+| SQL-миграций          | 31         |
 | Таблиц в БД           | ~28        |
 | Контроллеров          | 21         |
 | Сервисов              | ~22        |

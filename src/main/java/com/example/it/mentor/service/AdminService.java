@@ -60,6 +60,7 @@ public class AdminService {
                 .findFirst()
                 .orElse(roleToRemove);
         replaceRole(user, roleToAdd, targetRole, roleToRemove);
+        user.setTokenVersion(user.getTokenVersion() + 1);
         userRepository.save(user);
         log.info("Роль назначена: userId={}, newRole={}, removedRole={}", userId, targetRole, roleToRemove);
         ensureProfileExists(user, userId, targetRole);

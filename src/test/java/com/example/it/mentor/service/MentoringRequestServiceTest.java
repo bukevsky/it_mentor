@@ -54,7 +54,6 @@ class MentoringRequestServiceTest {
     @Mock private MentorProfileRepository mentorProfileRepository;
     @Mock private UserService userService;
     @Mock private MentoringRequestMapper mapper;
-    @Mock private ChatService chatService;
     @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     private User studentUser;

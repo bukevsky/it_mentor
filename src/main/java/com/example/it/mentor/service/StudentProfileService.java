@@ -66,6 +66,8 @@ public class StudentProfileService {
     private final StudentProfileMapper mapper;
     private final FileStorage fileStorage;
 
+    private static final long CLEAR_CITY_SENTINEL = 0L;
+
     /**
      * Возвращает профиль текущего аутентифицированного студента вместе со связанными данными.
      *
@@ -167,7 +169,7 @@ public class StudentProfileService {
         if (request.about() != null) profile.setAbout(request.about());
         if (request.maxContact() != null) profile.setMaxContact(request.maxContact());
         if (request.cityId() != null) {
-            if (request.cityId() == 0L) {
+            if (request.cityId() == CLEAR_CITY_SENTINEL) {
                 profile.setCity(null);
             } else {
                 profile.setCity(resolveCity(request.cityId()));

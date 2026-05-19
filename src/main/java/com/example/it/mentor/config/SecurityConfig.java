@@ -82,7 +82,8 @@ public class SecurityConfig {
                         .authenticationEntryPoint(http401EntryPoint)
                         .accessDeniedHandler(http403AccessDeniedHandler))
                 .headers(headers -> headers
-                        .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'"))
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"))
                         .httpStrictTransportSecurity(hsts -> hsts
                                 .maxAgeInSeconds(31536000)
                                 .includeSubDomains(true)))
@@ -100,7 +101,8 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(Arrays.asList(corsAllowedOrigins.split(",")));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id"));
+        config.setExposedHeaders(List.of("ETag", "Location"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

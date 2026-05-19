@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 @Slf4j
 @Configuration
@@ -22,6 +23,7 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setMaxPoolSize(8);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("async-mail-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;
     }

@@ -15,6 +15,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import io.jsonwebtoken.JwtException;
+
 import java.io.IOException;
 
 /**
@@ -79,7 +81,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (JwtException | IllegalArgumentException e) {
             log.warn("Не удалось установить аутентификацию пользователя: {}", e.getMessage());
         }
 

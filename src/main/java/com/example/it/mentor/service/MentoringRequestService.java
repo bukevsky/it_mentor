@@ -58,7 +58,6 @@ public class MentoringRequestService {
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
     private final MentoringRequestMapper mapper;
-    private final ChatService chatService;
     private final ApplicationEventPublisher eventPublisher;
 
     /**
@@ -235,7 +234,6 @@ public class MentoringRequestService {
         markAsResponded(request);
         requestRepository.save(request);
         log.info("Заявка принята: requestId={}, userId={}", requestId, currentUser.getId());
-        chatService.createForRequest(request);
         eventPublisher.publishEvent(new MentoringRequestAcceptedEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }

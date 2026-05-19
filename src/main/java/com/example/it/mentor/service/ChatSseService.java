@@ -4,6 +4,8 @@ import com.example.it.mentor.dto.chat.ChatMessageResponse;
 import com.example.it.mentor.dto.sse.PresencePayload;
 import com.example.it.mentor.dto.sse.TypingPayload;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -18,8 +20,11 @@ public class ChatSseService {
 
     private final Map<Long, SseEmitter> emitters = new ConcurrentHashMap<>();
 
+    @Value("${app.sse.timeout-ms:300000}")
+    private long sseTimeoutMs;
+
     public SseEmitter subscribe(Long userId, Runnable onDisconnect) {
-        SseEmitter emitter = new SseEmitter(300_000L);
+        SseEmitter emitter = new SseEmitter(sseTimeoutMs);
         emitters.put(userId, emitter);
         Runnable cleanup = () -> {
             emitters.remove(userId, emitter);
@@ -52,6 +57,19 @@ public class ChatSseService {
 
     public void pushPresenceChanged(Set<Long> recipientIds, PresencePayload payload) {
         recipientIds.forEach(uid -> pushToUser(uid, "presence.changed", payload));
+    }
+
+    @Scheduled(fixedDelay = 15_000)
+    public void sendHeartbeat() {
+        emitters.forEach((userId, emitter) -> {
+            try {
+                emitter.send(SseEmitter.event().comment("heartbeat"));
+            } catch (IOException e) {
+                log.debug("SSE heartbeat не удался, удаляем emitter: userId={}", userId);
+                emitter.complete();
+                emitters.remove(userId, emitter);
+            }
+        });
     }
 
     private void pushToUser(Long userId, String eventName, Object data) {

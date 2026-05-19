@@ -150,6 +150,7 @@ interface ErrorResponse {
 | 400 | `MALFORMED_JSON` | Невалидный JSON в теле запроса | — |
 | 401 | `UNAUTHORIZED` | Нет токена / токен невалиден / токен истёк | — |
 | 403 | `FORBIDDEN` | Нет прав доступа | — |
+| 429 | `TOO_MANY_REQUESTS` | Превышен rate-limit на `/auth/login`, `/auth/password/**` (10 req/min per IP) | — |
 | 404 | `NOT_FOUND` | Ресурс не найден | — |
 | 405 | `METHOD_NOT_ALLOWED` | Неправильный HTTP-метод | — |
 | 409 | `CONFLICT` | Конфликт (например, email уже зарегистрирован) | — |
@@ -551,7 +552,7 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
 | `availableFrom` | string \| null | Дата готовности (`"YYYY-MM-DD"`) |
 | `about` | string \| null | О себе |
 | `maxContact` | string \| null | Доп. контакт |
-| `cityId` | number \| null | ID города |
+| `cityId` | number \| null | ID города (`null` — не трогать; `0` — очистить город) |
 | `employmentTypes` | string[] \| null | Типы занятости (полная замена) |
 | `workFormats` | string[] \| null | Форматы работы (полная замена) |
 
@@ -3586,7 +3587,7 @@ function parseValidationDetails(details: string[]): Record<string, string> {
 
 ### Q: После смены роли через `/admin/users/{id}/role` старый токен перестаёт работать?
 
-**A:** Нет, старый JWT технически валиден до истечения срока (24 часа). Однако он содержит старые роли. Для получения JWT с новыми ролями пользователю нужно **повторно залогиниться** через `POST /auth/login`. Кеш `userDetails` инвалидируется при смене роли.
+**A:** Да. При смене роли backend инкрементит `User.tokenVersion` — так же, как при блокировке. На ближайшем запросе со старым токеном пользователь получит `401`. Это намеренное поведение: пользователь должен перелогиниться, чтобы получить JWT с новыми authorities. Кеш `userDetails` также сбрасывается.
 
 ---
 
@@ -3595,6 +3596,21 @@ function parseValidationDetails(details: string[]): Record<string, string> {
 **A:** Да, токен моментально становится невалидным. При переходе в `BLOCKED` или `DELETED` backend инкрементит `User.tokenVersion`, который зашит в claim `tv` каждого JWT. На ближайшем запросе фронт получит `401`. Это поведение отличается от `ROLE_CHANGED` — там токен остаётся технически валидным со старыми ролями.
 
 Возврат в `ACTIVE` (unblock) **не возвращает** `tokenVersion` назад — пользователь обязан перелогиниться. На фронте: на `401` всегда чистите хранилище и редиректьте на `/login`.
+
+---
+
+### Q: Сервер возвращает 429 на `/auth/login` — что это?
+
+**A:** Backend применяет rate-limiting: не более **10 запросов с одного IP в минуту** на `POST /auth/login`, `POST /auth/password/forgot`, `POST /auth/password/reset`. При превышении — `429 Too Many Requests`. Рекомендации для фронтенда:
+- Добавьте обработку `429` в глобальный перехватчик ошибок.
+- Показывайте пользователю сообщение «Слишком много попыток. Повторите через минуту».
+- Не делайте автоматических повторных запросов при 429 — это только продлит блокировку.
+
+```typescript
+if (res.status === 429) {
+  throw new Error('Слишком много запросов. Попробуйте позже.');
+}
+```
 
 ---
 
