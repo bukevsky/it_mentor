@@ -4,8 +4,10 @@ import com.example.it.mentor.entity.AdminAuditLog;
 import com.example.it.mentor.entity.enums.AuditAction;
 import com.example.it.mentor.event.audit.AuditEvent;
 import com.example.it.mentor.event.audit.ComplaintResolvedAuditEvent;
+import com.example.it.mentor.event.audit.DictionaryChangedAuditEvent;
 import com.example.it.mentor.event.audit.ReviewModeratedAuditEvent;
 import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
+import com.example.it.mentor.event.audit.UserStatusChangedAuditEvent;
 import com.example.it.mentor.repository.AdminAuditLogRepository;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.core.JacksonException;
@@ -54,6 +56,20 @@ public class AuditWriter {
                     .action(AuditAction.COMPLAINT_RESOLVED)
                     .targetType("COMPLAINT")
                     .targetId(e.complaintId())
+                    .payload(serialize(e))
+                    .build();
+            case UserStatusChangedAuditEvent e -> AdminAuditLog.builder()
+                    .adminUserId(e.adminUserId())
+                    .action(AuditAction.USER_STATUS_CHANGED)
+                    .targetType("USER")
+                    .targetId(e.targetUserId())
+                    .payload(serialize(e))
+                    .build();
+            case DictionaryChangedAuditEvent e -> AdminAuditLog.builder()
+                    .adminUserId(e.adminUserId())
+                    .action(AuditAction.DICTIONARY_CHANGED)
+                    .targetType("DICTIONARY_" + e.dictionaryType().name())
+                    .targetId(e.entryId())
                     .payload(serialize(e))
                     .build();
         };

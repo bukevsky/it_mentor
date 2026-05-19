@@ -16,4 +16,8 @@ public interface DictSkillRepository extends JpaRepository<DictSkill, Long> {
      * @return список активных навыков
      */
     List<DictSkill> findByActiveTrueOrderByNameAsc();
+
+    List<DictSkill> findAllByOrderByNameAsc();
+
+    boolean existsByNameIgnoreCaseAndActiveTrue(String name);
 }

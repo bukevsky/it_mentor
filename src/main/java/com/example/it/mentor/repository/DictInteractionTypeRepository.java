@@ -16,4 +16,8 @@ public interface DictInteractionTypeRepository extends JpaRepository<DictInterac
      * @return список активных типов взаимодействия
      */
     List<DictInteractionType> findByActiveTrueOrderByNameAsc();
+
+    List<DictInteractionType> findAllByOrderByNameAsc();
+
+    boolean existsByNameIgnoreCaseAndActiveTrue(String name);
 }

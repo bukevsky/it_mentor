@@ -5,7 +5,11 @@ import com.example.it.mentor.entity.Role;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.entity.UserStatus;
 import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
+import com.example.it.mentor.event.audit.UserStatusChangedAuditEvent;
+import com.example.it.mentor.exception.BusinessRuleViolationException;
+import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
@@ -26,6 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -133,6 +138,141 @@ class AdminServiceTest {
         assertThat(event.targetUserId()).isEqualTo(1L);
         assertThat(event.oldRole()).isEqualTo(RoleCode.STUDENT);
         assertThat(event.newRole()).isEqualTo(RoleCode.MENTOR);
+    }
+
+    // ── changeUserStatus ──────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("changeUserStatus_blocked_bumpsTokenVersionAndEvictsCache")
+    void changeUserStatus_blocked_bumpsTokenVersionAndEvictsCache() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", 5L);
+        User admin = buildAdmin(99L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.changeUserStatus(5L, UserStatus.BLOCKED);
+
+        assertThat(user.getTokenVersion()).isEqualTo(1L);
+        verify(userDetailsService).evictUserCache("user@test.com");
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_deleted_setsDeletedFlagAndBumpsTokenVersion")
+    void changeUserStatus_deleted_setsDeletedFlagAndBumpsTokenVersion() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", 5L);
+        User admin = buildAdmin(99L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.changeUserStatus(5L, UserStatus.DELETED);
+
+        assertThat(user.isDeleted()).isTrue();
+        assertThat(user.getTokenVersion()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_deletedToActive_clearsDeletedFlag")
+    void changeUserStatus_deletedToActive_clearsDeletedFlag() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.DELETED);
+        user.setDeleted(true);
+        ReflectionTestUtils.setField(user, "id", 5L);
+        User admin = buildAdmin(99L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.changeUserStatus(5L, UserStatus.ACTIVE);
+
+        assertThat(user.isDeleted()).isFalse();
+        assertThat(user.getTokenVersion()).isEqualTo(0L); // no bump on unblock
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_activeFromBlocked_doesNotBumpTokenVersion")
+    void changeUserStatus_activeFromBlocked_doesNotBumpTokenVersion() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.BLOCKED);
+        ReflectionTestUtils.setField(user, "id", 5L);
+        User admin = buildAdmin(99L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.changeUserStatus(5L, UserStatus.ACTIVE);
+
+        assertThat(user.getTokenVersion()).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_sameStatus_throwsConflict")
+    void changeUserStatus_sameStatus_throwsConflict() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", 5L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.changeUserStatus(5L, UserStatus.ACTIVE))
+                .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_emailNotConfirmed_throwsBusinessRule")
+    void changeUserStatus_emailNotConfirmed_throwsBusinessRule() {
+        assertThatThrownBy(() -> service.changeUserStatus(5L, UserStatus.EMAIL_NOT_CONFIRMED))
+                .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_adminTarget_throwsBusinessRule")
+    void changeUserStatus_adminTarget_throwsBusinessRule() {
+        User adminUser = userWithRoleAndStatus(RoleCode.ADMIN, "admin@test.com", UserStatus.ACTIVE);
+        ReflectionTestUtils.setField(adminUser, "id", 10L);
+
+        when(userRepository.findWithRolesById(10L)).thenReturn(Optional.of(adminUser));
+
+        assertThatThrownBy(() -> service.changeUserStatus(10L, UserStatus.BLOCKED))
+                .isInstanceOf(BusinessRuleViolationException.class);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_publishesAuditEvent_withOldAndNewStatus")
+    void changeUserStatus_publishesAuditEvent_withOldAndNewStatus() {
+        User user = userWithRoleAndStatus(RoleCode.STUDENT, "user@test.com", UserStatus.ACTIVE);
+        ReflectionTestUtils.setField(user, "id", 5L);
+        User admin = buildAdmin(99L);
+
+        when(userRepository.findWithRolesById(5L)).thenReturn(Optional.of(user));
+        when(userService.getCurrentUserEntity()).thenReturn(admin);
+
+        service.changeUserStatus(5L, UserStatus.BLOCKED);
+
+        ArgumentCaptor<UserStatusChangedAuditEvent> captor =
+                ArgumentCaptor.forClass(UserStatusChangedAuditEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        UserStatusChangedAuditEvent event = captor.getValue();
+        assertThat(event.adminUserId()).isEqualTo(99L);
+        assertThat(event.targetUserId()).isEqualTo(5L);
+        assertThat(event.oldStatus()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(event.newStatus()).isEqualTo(UserStatus.BLOCKED);
+    }
+
+    private User userWithRoleAndStatus(RoleCode code, String email, UserStatus status) {
+        User user = User.builder()
+                .email(email)
+                .status(status)
+                .roles(new HashSet<>(Set.of(role(code))))
+                .build();
+        return user;
+    }
+
+    private User buildAdmin(long id) {
+        User admin = User.builder().email("admin@test.com").build();
+        ReflectionTestUtils.setField(admin, "id", id);
+        return admin;
     }
 
     private User userWithRole(RoleCode code, String email) {

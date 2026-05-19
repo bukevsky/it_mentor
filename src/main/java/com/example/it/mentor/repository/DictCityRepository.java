@@ -16,4 +16,8 @@ public interface DictCityRepository extends JpaRepository<DictCity, Long> {
      * @return список активных городов
      */
     List<DictCity> findByActiveTrueOrderByNameAsc();
+
+    List<DictCity> findAllByOrderByNameAsc();
+
+    boolean existsByNameIgnoreCaseAndActiveTrue(String name);
 }

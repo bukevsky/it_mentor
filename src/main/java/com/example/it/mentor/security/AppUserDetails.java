@@ -11,31 +11,24 @@ import java.util.Collection;
 public class AppUserDetails extends User {
 
     private final Long userId;
+    private final Long tokenVersion;
 
-    /**
-     * Создаёт security-представление пользователя.
-     *
-     * @param userId идентификатор пользователя в БД
-     * @param username username пользователя
-     * @param password захешированный пароль
-     * @param enabled признак доступности учётной записи
-     * @param authorities список ролей и прав
-     */
     public AppUserDetails(Long userId,
                           String username,
                           String password,
                           boolean enabled,
+                          Long tokenVersion,
                           Collection<? extends GrantedAuthority> authorities) {
         super(username, password, enabled, true, true, true, authorities);
         this.userId = userId;
+        this.tokenVersion = tokenVersion;
     }
 
-    /**
-     * Возвращает идентификатор пользователя в базе данных.
-     *
-     * @return идентификатор пользователя
-     */
     public Long getUserId() {
         return userId;
+    }
+
+    public Long getTokenVersion() {
+        return tokenVersion;
     }
 }

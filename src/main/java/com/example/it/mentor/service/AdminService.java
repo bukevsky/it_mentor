@@ -10,7 +10,9 @@ import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.UserStatus;
 import com.example.it.mentor.event.audit.RoleChangedAuditEvent;
+import com.example.it.mentor.event.audit.UserStatusChangedAuditEvent;
 import com.example.it.mentor.exception.BusinessRuleViolationException;
+import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.RoleRepository;
@@ -64,6 +66,50 @@ public class AdminService {
         userDetailsService.evictUserCache(user.getEmail());
         Long adminId = userService.getCurrentUserEntity().getId();
         eventPublisher.publishEvent(new RoleChangedAuditEvent(adminId, userId, oldRole, targetRole));
+    }
+
+    @Transactional
+    public void changeUserStatus(Long userId, UserStatus newStatus) {
+        log.info("Смена статуса пользователя: userId={}, newStatus={}", userId, newStatus);
+
+        if (newStatus == UserStatus.EMAIL_NOT_CONFIRMED) {
+            throw new BusinessRuleViolationException(
+                    "Статус EMAIL_NOT_CONFIRMED управляется только системой");
+        }
+
+        User user = loadUser(userId);
+        UserStatus oldStatus = user.getStatus();
+
+        if (oldStatus == newStatus) {
+            throw new ConflictException("Статус уже установлен: " + newStatus);
+        }
+
+        boolean isAdmin = user.getRoles().stream()
+                .map(Role::getCode)
+                .anyMatch(c -> c == RoleCode.ADMIN);
+        if (isAdmin) {
+            throw new BusinessRuleViolationException("Нельзя менять статус администратора");
+        }
+
+        if (newStatus == UserStatus.DELETED) {
+            user.setDeleted(true);
+        } else if (oldStatus == UserStatus.DELETED) {
+            user.setDeleted(false);
+        }
+
+        if (newStatus == UserStatus.BLOCKED || newStatus == UserStatus.DELETED) {
+            user.setTokenVersion(user.getTokenVersion() + 1);
+        }
+
+        user.setStatus(newStatus);
+        userRepository.save(user);
+        log.info("Статус изменён: userId={}, oldStatus={}, newStatus={}, tokenVersion={}",
+                userId, oldStatus, newStatus, user.getTokenVersion());
+
+        userDetailsService.evictUserCache(user.getEmail());
+
+        Long adminId = userService.getCurrentUserEntity().getId();
+        eventPublisher.publishEvent(new UserStatusChangedAuditEvent(adminId, userId, oldStatus, newStatus));
     }
 
     @Transactional(readOnly = true)
