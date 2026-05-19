@@ -89,10 +89,12 @@ public class StudentProfile extends BaseEntity {
     private Set<StudentEducation> educations = new HashSet<>();
 
     @OneToMany(mappedBy = "studentProfile", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
     @Builder.Default
     private Set<StudentLanguage> languages = new HashSet<>();
 
     @OneToMany(mappedBy = "studentProfile", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
     @Builder.Default
     private Set<StudentSkill> skills = new HashSet<>();
 

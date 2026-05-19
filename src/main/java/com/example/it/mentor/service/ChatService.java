@@ -106,12 +106,12 @@ public class ChatService {
 
         Map<Long, String> studentNames = buildNameMap(
                 studentProfileRepository.findAllByUserIdIn(studentUserIds),
-                p -> p.getUser() != null ? p.getUser().getId() : null,
+                p -> p.getUser().getId(),
                 p -> p.getFirstName() + " " + p.getLastName()
         );
         Map<Long, String> mentorNames = buildNameMap(
                 mentorProfileRepository.findAllByUserIdIn(mentorUserIds),
-                p -> p.getUser() != null ? p.getUser().getId() : null,
+                p -> p.getUser().getId(),
                 p -> p.getFirstName() + " " + p.getLastName()
         );
 

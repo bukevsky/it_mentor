@@ -18,6 +18,12 @@ logging:
     org.springframework.security: DEBUG
     liquibase: INFO
 
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
+
 spring:
   datasource:
     password: itmentor

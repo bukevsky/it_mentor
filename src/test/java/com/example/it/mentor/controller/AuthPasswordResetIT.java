@@ -1,15 +1,18 @@
 package com.example.it.mentor.controller;
 
 import com.example.it.mentor.dto.*;
-import com.example.it.mentor.repository.PasswordResetTokenRepository;
+import com.example.it.mentor.service.EmailService;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -17,6 +20,8 @@ import org.springframework.test.context.ActiveProfiles;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
@@ -27,8 +32,8 @@ class AuthPasswordResetIT {
     @Autowired
     private TestRestTemplate restTemplate;
 
-    @Autowired
-    private PasswordResetTokenRepository tokenRepository;
+    @MockitoSpyBean
+    private EmailService emailService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -275,22 +280,20 @@ class AuthPasswordResetIT {
     }
 
     /**
-     * Вызывает forgot-password и возвращает OTP-код из БД.
-     * Использует JDBC напрямую, чтобы избежать LazyInitializationException
-     * при обращении к полю user у detached-сущности PasswordResetToken.
+     * Вызывает forgot-password и перехватывает OTP-код через spy на EmailService.
+     * После миграции 029 OTP хранится в БД как BCrypt-хеш, поэтому JDBC-запрос к plain-text коду невозможен.
      */
     private String createResetToken(String email) {
+        Mockito.clearInvocations(emailService);
+
         restTemplate.postForEntity("/auth/password/forgot",
                 new ForgotPasswordRequest(email), Object.class);
 
-        String code = jdbcTemplate.queryForObject(
-                "SELECT t.token FROM password_reset_tokens t " +
-                "JOIN users u ON t.user_id = u.id " +
-                "WHERE u.email = ? AND t.used = false " +
-                "ORDER BY t.id DESC LIMIT 1",
-                String.class, email);
+        ArgumentCaptor<String> codeCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailService).sendPasswordResetOtp(eq(email), codeCaptor.capture());
 
-        assertThat(code).as("OTP-код для %s должен быть создан в БД", email).isNotBlank();
+        String code = codeCaptor.getValue();
+        assertThat(code).as("OTP-код для %s должен быть создан", email).isNotBlank();
         return code;
     }
 

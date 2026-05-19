@@ -16,6 +16,8 @@ public class AdminAuditEventListener {
 
     private final AuditWriter auditWriter;
 
+    // Sync by design: audit must be durable before HTTP response returns.
+    // If audit write fails, AuditWriter swallows the exception — business operation is already committed.
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onRoleChanged(RoleChangedAuditEvent event) {
         auditWriter.write(event);

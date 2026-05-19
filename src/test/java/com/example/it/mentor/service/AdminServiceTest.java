@@ -78,6 +78,7 @@ class AdminServiceTest {
         assertThat(created.getLastName()).isEqualTo("Иванов");
         assertThat(user.getRoles()).anyMatch(role -> role.getCode() == RoleCode.MENTOR);
         assertThat(user.getRoles()).noneMatch(role -> role.getCode() == RoleCode.STUDENT);
+        assertThat(user.getTokenVersion()).isEqualTo(1L);
         verify(userDetailsService).evictUserCache("user@test.com");
     }
 
@@ -110,6 +111,7 @@ class AdminServiceTest {
         assertThat(created.getLastName()).isEqualTo("Смирнова");
         assertThat(user.getRoles()).anyMatch(role -> role.getCode() == RoleCode.STUDENT);
         assertThat(user.getRoles()).noneMatch(role -> role.getCode() == RoleCode.MENTOR);
+        assertThat(user.getTokenVersion()).isEqualTo(1L);
         verify(userDetailsService).evictUserCache("mentor@test.com");
     }
 
@@ -138,6 +140,7 @@ class AdminServiceTest {
         assertThat(event.targetUserId()).isEqualTo(1L);
         assertThat(event.oldRole()).isEqualTo(RoleCode.STUDENT);
         assertThat(event.newRole()).isEqualTo(RoleCode.MENTOR);
+        assertThat(user.getTokenVersion()).isEqualTo(1L);
     }
 
     // ── changeUserStatus ──────────────────────────────────────────────────────

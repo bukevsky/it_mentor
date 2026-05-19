@@ -3,6 +3,7 @@ package com.example.it.mentor.service;
 import com.example.it.mentor.dto.dashboard.ActivityItemResponse;
 import com.example.it.mentor.dto.dashboard.DashboardSummaryResponse;
 import com.example.it.mentor.entity.MentoringRequest;
+import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.enums.MentoringRequestStatus;
 import com.example.it.mentor.repository.ChatReadStateRepository;
@@ -39,14 +40,14 @@ public class DashboardService {
 
     public DashboardSummaryResponse getSummary() {
         User user = userService.getCurrentUserEntity();
-        String role = user.primaryRole().name();
+        RoleCode role = user.primaryRole();
 
         int sentRequests = 0;
         int pendingRequests = 0;
         int acceptedRequests = 0;
         int profileCompletion = 0;
 
-        if ("STUDENT".equals(role)) {
+        if (role == RoleCode.STUDENT) {
             var profileOpt = studentProfileRepository.findByUserId(user.getId());
             if (profileOpt.isPresent()) {
                 Long pid = profileOpt.get().getId();
@@ -58,7 +59,7 @@ public class DashboardService {
                         pid, MentoringRequestStatus.ACCEPTED);
                 profileCompletion = studentProfileService.getCompletion().percent();
             }
-        } else if ("MENTOR".equals(role)) {
+        } else if (role == RoleCode.MENTOR) {
             var profileOpt = mentorProfileRepository.findByUserId(user.getId());
             if (profileOpt.isPresent()) {
                 Long pid = profileOpt.get().getId();
@@ -76,23 +77,23 @@ public class DashboardService {
         int unreadChats = (int) unreadMap.values().stream().filter(v -> v > 0).count();
 
         return new DashboardSummaryResponse(
-                role, sentRequests, pendingRequests, acceptedRequests,
+                role.name(), sentRequests, pendingRequests, acceptedRequests,
                 totalChats, unreadChats, profileCompletion,
                 mentoringSessionService.findNextForCurrentUser().orElse(null));
     }
 
     public List<ActivityItemResponse> getActivity(int limit) {
         User user = userService.getCurrentUserEntity();
-        String role = user.primaryRole().name();
+        RoleCode role = user.primaryRole();
         List<ActivityItemResponse> items = new ArrayList<>();
 
-        if ("STUDENT".equals(role)) {
+        if (role == RoleCode.STUDENT) {
             studentProfileRepository.findByUserId(user.getId()).ifPresent(profile -> {
                 requestRepository.findByStudentProfileId(profile.getId(),
                         PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "createdAt")))
                         .forEach(req -> items.add(toRequestActivity(req)));
             });
-        } else if ("MENTOR".equals(role)) {
+        } else if (role == RoleCode.MENTOR) {
             mentorProfileRepository.findByUserId(user.getId()).ifPresent(profile -> {
                 requestRepository.findByMentorProfileId(profile.getId(),
                         PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "createdAt")))

@@ -16,15 +16,6 @@ import java.util.Optional;
 public interface PasswordResetTokenRepository extends JpaRepository<PasswordResetToken, Long> {
 
     /**
-     * Ищет токен по пользователю и его строковому значению.
-     *
-     * @param userId идентификатор пользователя
-     * @param token значение токена
-     * @return найденный токен
-     */
-    Optional<PasswordResetToken> findByUserIdAndToken(Long userId, String token);
-
-    /**
      * Помечает использованными все активные токены конкретного пользователя.
      *
      * @param userId идентификатор пользователя
@@ -34,23 +25,22 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
     void invalidateAllByUserId(Long userId);
 
     /**
-     * Атомарно помечает токен как использованный, если он не использован, не истёк и не превышен лимит попыток.
-     * Возвращает количество обновлённых строк (0 = токен недействителен).
+     * Возвращает самый свежий активный токен пользователя для сравнения хеша в Java.
+     * Активный — не использован, не истёк и не достиг лимита попыток.
      */
-    @Modifying
     @Query("""
-            UPDATE PasswordResetToken t SET t.used = true
-            WHERE t.user.id = :userId AND t.token = :token
-              AND t.used = false AND t.expiresAt > :now AND t.attempts < :maxAttempts
+            SELECT t FROM PasswordResetToken t
+            WHERE t.user.id = :userId
+              AND t.used = false
+              AND t.expiresAt > :now
+              AND t.attempts < :maxAttempts
+            ORDER BY t.createdAt DESC
+            LIMIT 1
             """)
-    int markTokenUsed(Long userId, String token, OffsetDateTime now, int maxAttempts);
-
-    @Modifying
-    @Query("""
-            UPDATE PasswordResetToken t SET t.attempts = t.attempts + 1
-            WHERE t.user.id = :userId AND t.token = :token AND t.used = false
-            """)
-    void incrementAttempts(Long userId, String token);
+    Optional<PasswordResetToken> findActiveByUserId(
+            @org.springframework.data.repository.query.Param("userId") Long userId,
+            @org.springframework.data.repository.query.Param("now") OffsetDateTime now,
+            @org.springframework.data.repository.query.Param("maxAttempts") int maxAttempts);
 
     /**
      * Удаляет все истёкшие токены.

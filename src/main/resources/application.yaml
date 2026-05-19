@@ -69,6 +69,18 @@ app:
     bucket-name: ${MINIO_BUCKET:itmentor}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  sse:
+    timeout-ms: 300000
+  security:
+    rate-limit:
+      auth-per-minute: 10
+      paths: /auth/login,/auth/password/forgot,/auth/password/reset
+
+springdoc:
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false
 
 management:
   endpoints:

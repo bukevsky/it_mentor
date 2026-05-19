@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
@@ -32,6 +33,7 @@ public class SmtpEmailService implements EmailService {
      * @param toEmail адрес получателя
      * @param otpCode одноразовый код сброса пароля
      */
+    @Async("mailExecutor")
     @Override
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
         SimpleMailMessage msg = new SimpleMailMessage();
@@ -60,7 +62,7 @@ public class SmtpEmailService implements EmailService {
             mailSender.send(mime);
             log.info("Письмо отправлено: to={}, subject={}", message.to(), message.subject());
         } catch (Exception e) {
-            log.error("Ошибка отправки письма: to={}, subject={}, error={}", message.to(), message.subject(), e.getMessage());
+            log.error("Ошибка отправки письма: to={}, subject={}", message.to(), message.subject(), e);
             throw new RuntimeException("Ошибка отправки письма: " + e.getMessage(), e);
         }
     }
