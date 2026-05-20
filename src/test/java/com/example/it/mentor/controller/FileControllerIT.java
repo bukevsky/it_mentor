@@ -1,5 +1,6 @@
 package com.example.it.mentor.controller;
 
+import com.example.it.mentor.dto.ErrorResponse;
 import com.example.it.mentor.dto.FileUploadResponse;
 import com.example.it.mentor.dto.LoginRequest;
 import com.example.it.mentor.dto.LoginResponse;
@@ -241,6 +242,46 @@ class FileControllerIT {
             assertThat(second.getBody().id())
                     .as("Второй аватар должен получить новый id")
                     .isNotEqualTo(first.getBody().id());
+        }
+    }
+
+    // ── GET /files/{id}/download ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("GET /files/{id}/download")
+    class DownloadFile {
+
+        @Test
+        @DisplayName("авторизованный download → 200, корректный Content-Length и тело совпадает с загруженным")
+        void authorized_shouldReturn200WithCorrectBytes() {
+            String token = registerAndLogin();
+            byte[] uploaded = validContent("application/pdf");
+            ResponseEntity<FileUploadResponse> upload = uploadFile(
+                    "/files/portfolio", "doc.pdf", "application/pdf", uploaded, token);
+            Long fileId = upload.getBody().id();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(token);
+            ResponseEntity<byte[]> response = restTemplate.exchange(
+                    "/files/" + fileId + "/download", HttpMethod.GET,
+                    new HttpEntity<>(headers), byte[].class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(response.getHeaders().getContentLength()).isEqualTo(uploaded.length);
+            assertThat(response.getBody()).isEqualTo(uploaded);
+        }
+
+        @Test
+        @DisplayName("download без токена → 401 JSON, без обрыва соединения")
+        void unauthenticated_shouldReturn401WithoutBreakingConnection() {
+            HttpHeaders headers = new HttpHeaders();
+            ResponseEntity<ErrorResponse> response = restTemplate.exchange(
+                    "/files/1/download", HttpMethod.GET,
+                    new HttpEntity<>(headers), ErrorResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().status()).isEqualTo(401);
         }
     }
 

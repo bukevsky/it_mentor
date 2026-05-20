@@ -329,10 +329,16 @@ class MentorProfileControllerIT {
         }
 
         @Test
-        @DisplayName("без токена → 401")
-        void withoutToken_shouldReturn401() {
+        @DisplayName("без токена → не 401: GET /profiles/mentors/{id} публичный")
+        void withoutToken_shouldBePublic() {
             ResponseEntity<Object> response = restTemplate.getForEntity("/profiles/mentors/1", Object.class);
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            // Эндпоинт публичный (см. SecurityConfig). Допустимы 200 (есть профиль)
+            // или 404 (нет), но не 401.
+            assertThat(response.getStatusCode())
+                    .as("GET /profiles/mentors/{id} должен быть публичным")
+                    .isNotEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(response.getStatusCode())
+                    .isIn(HttpStatus.OK, HttpStatus.NOT_FOUND);
         }
     }
 
