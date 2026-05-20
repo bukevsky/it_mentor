@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Обработчик отказа в доступе для аутентифицированного пользователя без нужных прав.
@@ -37,6 +38,7 @@ public class Http403AccessDeniedHandler implements AccessDeniedHandler {
                        HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getWriter(),
                 ErrorResponse.of(403, "FORBIDDEN", "Доступ запрещён", request.getRequestURI()));

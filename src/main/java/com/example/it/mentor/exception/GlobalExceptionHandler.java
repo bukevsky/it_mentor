@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import jakarta.validation.ConstraintViolationException;
@@ -15,6 +16,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
 
@@ -155,6 +157,35 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.METHOD_NOT_ALLOWED)
                 .body(ErrorResponse.of(405, "METHOD_NOT_ALLOWED", ex.getMessage(), request.getRequestURI()));
+    }
+
+    /**
+     * Обрабатывает обращения к несуществующим путям (DispatcherServlet не нашёл handler).
+     *
+     * @return HTTP 404 с кодом {@code NOT_FOUND}
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex,
+                                                          HttpServletRequest request) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of(404, "NOT_FOUND", "Ресурс не найден", request.getRequestURI()));
+    }
+
+    /**
+     * Обрабатывает отсутствие обязательного @RequestParam.
+     *
+     * @return HTTP 400 с кодом {@code VALIDATION_ERROR}
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException ex,
+                                                            HttpServletRequest request) {
+        String detail = ex.getParameterName() + ": обязательный параметр отсутствует";
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "VALIDATION_ERROR",
+                        "Отсутствует обязательный параметр запроса",
+                        request.getRequestURI(), List.of(detail)));
     }
 
     /**

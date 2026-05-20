@@ -277,10 +277,13 @@ async function apiCall<T>(url: string, options?: RequestInit): Promise<T> {
     "id": 1,
     "email": "student@example.com",
     "roles": ["STUDENT"],
-    "status": "ACTIVE"
+    "status": "EMAIL_NOT_CONFIRMED"
   }
 }
 ```
+
+> ℹ️ Сразу после `POST /auth/register` пользователь имеет `status: "EMAIL_NOT_CONFIRMED"`.
+> `ACTIVE` появляется только после подтверждения email или ручной активации админом.
 
 **Ошибки:**
 | Код | Когда |

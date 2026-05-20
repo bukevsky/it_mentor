@@ -13,6 +13,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpHeaders;
@@ -22,7 +24,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.util.Set;
 
@@ -90,19 +91,15 @@ public class FileController {
     }
 
     @GetMapping("/{fileId}/download")
-    public ResponseEntity<StreamingResponseBody> downloadFile(@PathVariable Long fileId) {
+    public ResponseEntity<Resource> downloadFile(@PathVariable Long fileId) {
         User user = userService.getCurrentUserEntity();
         FileDownloadInfo info = fileStorage.download(fileId, user.getId());
-        StreamingResponseBody body = outputStream -> {
-            try (var stream = info.stream()) {
-                stream.transferTo(outputStream);
-            }
-        };
+        Resource body = new InputStreamResource(info.stream());
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(info.contentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "inline; filename=\"" + info.originalFilename() + "\"")
-                .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(info.size()))
+                .contentLength(info.size())
                 .body(body);
     }
 

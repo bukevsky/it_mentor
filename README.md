@@ -154,10 +154,12 @@ Query params для поиска студентов: `q`, `cityId`, `skillIds[]`
 
 | Метод | Путь                     | Доступ    | Описание                                       |
 | :---- | :----------------------- | :-------- | :--------------------------------------------- |
-| `PUT` | `/profile/mentor`        | JWT       | Создать или обновить профиль                   |
+| `PUT` | `/profile/mentor`        | JWT       | Создать или обновить **свой** профиль (write)  |
 | `GET` | `/profile/mentor/me`     | JWT       | Получить свой профиль                          |
-| `GET` | `/profiles/mentors/{id}` | JWT       | Получить профиль ментора по ID                 |
+| `GET` | `/profiles/mentors/{id}` | Публичный | Получить профиль ментора по ID                 |
 | `GET` | `/profiles/mentors`      | Публичный | Поиск менторов с фильтрацией и пагинацией      |
+
+> ℹ️ Read-эндпоинты под `/profiles/mentors[/{id}]` — публичные (без JWT). Write выполняется через `PUT /profile/mentor` под собственной JWT-сессией. `{id}` в `/profiles/mentors/{id}` — это `mentor_profile.id`, **не** `user_id`.
 
 Query params для поиска менторов: `q`, `skillIds[]`, `cityId`, `recruitmentStatus`, `mentoringType`, `mentoringChannel`, `page`, `size`, `sort` (whitelist: `createdAt`, `firstName`, `lastName`).
 
