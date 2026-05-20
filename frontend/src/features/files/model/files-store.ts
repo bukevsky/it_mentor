@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import type { ErrorResponse, FileType, FileUploadResponse } from "@/shared/api/contracts";
+import type { ErrorResponse, FileResponse, FileType, FileUploadResponse } from "@/shared/api/contracts";
+import { imageCache, isImageAttachment } from "@/features/files/model/image-cache";
 import { normalizeErrorResponse } from "@/shared/lib/api-errors";
 import { filesApi } from "../api/files-api";
 
@@ -23,8 +24,6 @@ export interface ManagedFile {
   errorMessage?: string;
 }
 
-const FILES_STORAGE_KEY = "it-mentor.files";
-
 const kindToFileType: Record<UploadKind, FileType> = {
   resume: "RESUME",
   portfolio: "PORTFOLIO",
@@ -32,43 +31,18 @@ const kindToFileType: Record<UploadKind, FileType> = {
   "chat-attachment": "CHAT_ATTACHMENT"
 };
 
+const fileTypeToKind: Record<FileType, UploadKind> = {
+  RESUME: "resume",
+  PORTFOLIO: "portfolio",
+  AVATAR: "avatar",
+  CHAT_ATTACHMENT: "chat-attachment"
+};
+
 const uploaders: Record<UploadKind, (file: File) => Promise<FileUploadResponse>> = {
   resume: filesApi.uploadResume,
   portfolio: filesApi.uploadPortfolio,
   avatar: filesApi.uploadAvatar,
   "chat-attachment": filesApi.uploadChatAttachment
-};
-
-const getStoredFiles = (): ManagedFile[] => {
-  try {
-    const rawValue = window.localStorage.getItem(FILES_STORAGE_KEY);
-
-    if (!rawValue) {
-      return [];
-    }
-
-    return (JSON.parse(rawValue) as ManagedFile[]).map((file) => ({
-      ...file,
-      sourceFile: undefined,
-      previewUrl: undefined,
-      progress: file.status === "uploaded" ? 100 : 0,
-      status: file.status === "uploading" ? "error" : file.status
-    }));
-  } catch {
-    return [];
-  }
-};
-
-const persistFiles = (files: ManagedFile[]) => {
-  const serializableFiles = files
-    .filter((file) => file.status === "uploaded")
-    .map(({ sourceFile, previewUrl, ...file }) => file);
-
-  try {
-    window.localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(serializableFiles));
-  } catch {
-    // Local persistence is an enhancement; upload flow should not fail because of storage.
-  }
 };
 
 const createObjectPreview = (file: File) => {
@@ -94,16 +68,10 @@ const createTempFile = (kind: UploadKind, file: File): ManagedFile => ({
   previewUrl: createObjectPreview(file)
 });
 
-const createUploadedFile = (
-  kind: UploadKind,
-  sourceFile: File,
-  response: FileUploadResponse,
-  previous: ManagedFile
-): ManagedFile => ({
-  ...previous,
+const createManagedFile = (response: FileResponse | FileUploadResponse): ManagedFile => ({
   id: `${response.fileType.toLowerCase()}-${response.id}`,
   backendId: response.id,
-  kind,
+  kind: fileTypeToKind[response.fileType],
   fileType: response.fileType,
   name: response.originalFilename,
   size: response.size,
@@ -111,16 +79,26 @@ const createUploadedFile = (
   uploadedAt: response.uploadedAt,
   status: "uploaded",
   progress: 100,
-  sourceFile,
-  errorMessage: undefined
+  previewUrl: "previewUrl" in response && response.previewUrl?.startsWith("blob:")
+    ? response.previewUrl
+    : undefined
+});
+
+const createClientError = (message: string, path: string): ErrorResponse => ({
+  timestamp: new Date().toISOString(),
+  status: 0,
+  error: "FILES_ERROR",
+  message,
+  path
 });
 
 export const useFilesStore = defineStore("files", () => {
-  const files = ref<ManagedFile[]>(getStoredFiles());
+  const files = ref<ManagedFile[]>([]);
   const error = ref<ErrorResponse | null>(null);
   const successMessage = ref("");
   const activeKind = ref<UploadKind | "all">("all");
   const currentUploadId = ref<string | null>(null);
+  const isLoading = ref(false);
   let progressTimer: ReturnType<typeof setInterval> | null = null;
 
   const isUploading = computed(() => files.value.some((file) => file.status === "uploading"));
@@ -128,14 +106,6 @@ export const useFilesStore = defineStore("files", () => {
 
   const updateFile = (fileId: string, patch: Partial<ManagedFile>) => {
     files.value = files.value.map((file) => (file.id === fileId ? { ...file, ...patch } : file));
-  };
-
-  const removeSingleKindFiles = (kind: UploadKind, exceptFileId: string) => {
-    if (kind !== "resume" && kind !== "avatar") {
-      return;
-    }
-
-    files.value = files.value.filter((file) => file.kind !== kind || file.id === exceptFileId);
   };
 
   const startProgress = (fileId: string) => {
@@ -161,6 +131,20 @@ export const useFilesStore = defineStore("files", () => {
     }
   };
 
+  const loadFiles = async () => {
+    isLoading.value = true;
+    error.value = null;
+
+    try {
+      const response = await filesApi.list({ page: 0, size: 200, sort: "uploadedAt,desc" });
+      files.value = response.content.map(createManagedFile);
+    } catch (rawError) {
+      error.value = normalizeErrorResponse(rawError, "/files");
+    } finally {
+      isLoading.value = false;
+    }
+  };
+
   const upload = async (kind: UploadKind, file: File, options: { replaceId?: string } = {}) => {
     const pendingFile = createTempFile(kind, file);
     error.value = null;
@@ -170,7 +154,6 @@ export const useFilesStore = defineStore("files", () => {
     if (options.replaceId) {
       files.value = files.value.map((item) => (item.id === options.replaceId ? pendingFile : item));
     } else {
-      removeSingleKindFiles(kind, pendingFile.id);
       files.value = [pendingFile, ...files.value];
     }
 
@@ -178,12 +161,14 @@ export const useFilesStore = defineStore("files", () => {
 
     try {
       const response = await uploaders[kind](file);
-      const uploadedFile = createUploadedFile(kind, file, response, pendingFile);
-
-      files.value = files.value.map((item) => (item.id === pendingFile.id ? uploadedFile : item));
-      removeSingleKindFiles(kind, uploadedFile.id);
-      persistFiles(files.value);
+      if (isImageAttachment(response.contentType, response.originalFilename)) {
+        imageCache.prime(response.id, file, response.originalFilename);
+      }
+      files.value = files.value.map((item) =>
+        item.id === pendingFile.id ? createManagedFile(response) : item
+      );
       successMessage.value = "Файл загружен.";
+      await loadFiles();
     } catch (rawError) {
       const nextError = normalizeErrorResponse(rawError, `/files/${kind}`);
       updateFile(pendingFile.id, {
@@ -202,47 +187,106 @@ export const useFilesStore = defineStore("files", () => {
     const target = files.value.find((file) => file.id === fileId);
 
     if (!target?.sourceFile) {
+      error.value = createClientError("Повтор доступен только для файла из текущей попытки загрузки.", "/files");
       return;
     }
 
     void upload(target.kind, target.sourceFile, { replaceId: target.id });
   };
 
-  const replace = (fileId: string, file: File) => {
+  const replace = async (fileId: string, file: File) => {
     const target = files.value.find((item) => item.id === fileId);
 
     if (!target) {
       return;
     }
 
-    void upload(target.kind, file, { replaceId: fileId });
-  };
-
-  const remove = (fileId: string) => {
-    files.value = files.value.filter((file) => file.id !== fileId);
-    persistFiles(files.value);
-  };
-
-  const download = (fileId: string) => {
-    const target = files.value.find((file) => file.id === fileId);
-
-    if (!target?.sourceFile) {
-      error.value = {
-        timestamp: new Date().toISOString(),
-        status: 0,
-        error: "DOWNLOAD_UNAVAILABLE",
-        message: "Скачивание доступно для файлов, загруженных в текущей сессии.",
-        path: "/files"
-      };
+    if (!target.backendId) {
+      void upload(target.kind, file, { replaceId: fileId });
       return;
     }
 
-    const url = URL.createObjectURL(target.sourceFile);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = target.name;
-    link.click();
-    URL.revokeObjectURL(url);
+    error.value = null;
+    successMessage.value = "";
+    currentUploadId.value = target.id;
+    updateFile(target.id, {
+      status: "uploading",
+      progress: 8,
+      sourceFile: file,
+      previewUrl: createObjectPreview(file)
+    });
+    startProgress(target.id);
+
+    try {
+      const response = await filesApi.replace(target.backendId, file);
+      if (isImageAttachment(response.contentType, response.originalFilename)) {
+        imageCache.prime(response.id, file, response.originalFilename);
+      }
+      files.value = files.value.map((item) =>
+        item.id === target.id ? createManagedFile(response) : item
+      );
+      successMessage.value = "Файл заменён.";
+      await loadFiles();
+    } catch (rawError) {
+      const nextError = normalizeErrorResponse(rawError, `/files/${target.backendId}/replace`);
+      updateFile(target.id, {
+        status: "error",
+        progress: 0,
+        errorMessage: nextError.message
+      });
+      error.value = nextError;
+    } finally {
+      stopProgress();
+      currentUploadId.value = null;
+    }
+  };
+
+  const remove = async (fileId: string) => {
+    const target = files.value.find((file) => file.id === fileId);
+
+    if (!target) {
+      return;
+    }
+
+    if (!target.backendId) {
+      files.value = files.value.filter((file) => file.id !== fileId);
+      return;
+    }
+
+    error.value = null;
+    successMessage.value = "";
+
+    try {
+      await filesApi.remove(target.backendId);
+      files.value = files.value.filter((file) => file.id !== fileId);
+      successMessage.value = "Файл удалён.";
+    } catch (rawError) {
+      error.value = normalizeErrorResponse(rawError, `/files/${target.backendId}`);
+    }
+  };
+
+  const download = async (fileId: string) => {
+    const target = files.value.find((file) => file.id === fileId);
+
+    if (!target) {
+      return;
+    }
+
+    if (!target.backendId) {
+      error.value = createClientError("Файл ещё не сохранён на сервере.", "/files");
+      return;
+    }
+
+    error.value = null;
+
+    try {
+      await filesApi.download(target.backendId, target.name);
+    } catch (rawError) {
+      error.value = createClientError(
+        rawError instanceof Error ? rawError.message : "Не удалось скачать файл.",
+        `/files/${target.backendId}/download`
+      );
+    }
   };
 
   return {
@@ -251,7 +295,9 @@ export const useFilesStore = defineStore("files", () => {
     download,
     error,
     files,
+    isLoading,
     isUploading,
+    loadFiles,
     remove,
     replace,
     retry,

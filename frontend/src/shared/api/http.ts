@@ -62,10 +62,6 @@ export const request = async <T>(path: string, options: RequestOptions = {}): Pr
       ? await response.json()
       : null;
 
-    if (response.status === 401) {
-      tokenStorage.clear();
-    }
-
     throw new ApiError(response.status, payload);
   }
 

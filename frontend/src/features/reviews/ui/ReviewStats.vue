@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { BaseIcon } from "conductor";
 import type { ReviewSummaryResponse } from "@/shared/api/contracts";
 import ReviewRating from "./ReviewRating.vue";
 
@@ -26,12 +27,15 @@ const getPercent = (count: number, total: number) => {
         {{ isLoading ? "..." : summary.averageRating.toFixed(1) }}
       </div>
       <ReviewRating :value="summary.averageRating" readonly />
-      <p class="section-copy">{{ summary.totalReviews }} отзывов, {{ summary.moderationCount }} на модерации</p>
+      <p class="section-copy">{{ summary.totalReviews }} отзывов у выбранного ментора</p>
     </article>
 
     <article class="reviews-distribution">
       <div v-for="rating in ratingRows" :key="rating" class="reviews-distribution__row">
-        <span>{{ rating }}★</span>
+        <span class="reviews-distribution__label">
+          {{ rating }}
+          <BaseIcon icon="star" :width="14" :height="14" />
+        </span>
         <div class="reviews-distribution__bar">
           <span :style="{ width: `${getPercent(summary.distribution[rating], summary.totalReviews)}%` }"></span>
         </div>

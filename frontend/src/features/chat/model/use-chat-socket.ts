@@ -1,27 +1,27 @@
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import {
   CHAT_SOCKET_ENDPOINT,
-  createMockChatSocket,
-  USE_MOCK_CHAT_SOCKET,
+  createChatSseClient,
   type ChatSocketAdapter
 } from "@/features/chat/api/chat-socket";
 import { useChatStore } from "./chat-store";
 
 type ChatSocketStatus = "idle" | "connecting" | "connected" | "disconnected";
 
+const status = ref<ChatSocketStatus>("idle");
+const reconnectAttempt = ref(0);
+const adapter = ref<ChatSocketAdapter | null>(null);
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let shouldReconnect = true;
+
 export const useChatSocket = () => {
   const chatStore = useChatStore();
   const { activeChat } = storeToRefs(chatStore);
 
-  const status = ref<ChatSocketStatus>("idle");
-  const reconnectAttempt = ref(0);
-  const adapter = ref<ChatSocketAdapter | null>(null);
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
   const statusLabel = computed(() => {
     if (status.value === "connected") {
-      return USE_MOCK_CHAT_SOCKET ? "Demo realtime" : "В сети";
+      return "В сети";
     }
 
     if (status.value === "connecting") {
@@ -32,6 +32,10 @@ export const useChatSocket = () => {
   });
 
   const scheduleReconnect = () => {
+    if (!shouldReconnect) {
+      return;
+    }
+
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
     }
@@ -51,8 +55,9 @@ export const useChatSocket = () => {
     }
 
     status.value = "connecting";
+    shouldReconnect = true;
 
-    const nextAdapter = createMockChatSocket();
+    const nextAdapter = createChatSseClient();
     nextAdapter.onMessage((message) => {
       chatStore.receiveSocketMessage(message);
     });
@@ -62,8 +67,8 @@ export const useChatSocket = () => {
     });
 
     try {
-      await nextAdapter.connect();
       adapter.value = nextAdapter;
+      await nextAdapter.connect();
       status.value = "connected";
       reconnectAttempt.value = 0;
 
@@ -71,7 +76,9 @@ export const useChatSocket = () => {
         nextAdapter.subscribe(activeChat.value.id);
       }
     } catch {
-      adapter.value = null;
+      if (adapter.value === nextAdapter) {
+        adapter.value = null;
+      }
       scheduleReconnect();
     }
   };
@@ -80,44 +87,26 @@ export const useChatSocket = () => {
     adapter.value?.subscribe(chatId);
   };
 
-  const sendActiveMessage = async () => {
-    const pendingMessage = chatStore.createPendingMessage();
-
-    if (!pendingMessage?.tempId) {
-      return;
-    }
-
-    if (!adapter.value || status.value !== "connected") {
-      chatStore.failPendingMessage(pendingMessage.tempId);
-      scheduleReconnect();
-      return;
-    }
-
-    try {
-      const sentMessage = await adapter.value.sendMessage({
-        chatId: pendingMessage.chatId,
-        senderUserId: pendingMessage.senderUserId,
-        body: pendingMessage.body,
-        attachmentFileId: null,
-        tempId: pendingMessage.tempId
-      });
-      chatStore.confirmPendingMessage(pendingMessage.tempId, sentMessage);
-    } catch {
-      chatStore.failPendingMessage(pendingMessage.tempId);
-    }
-  };
-
-  onBeforeUnmount(() => {
+  const disconnect = () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
 
+    shouldReconnect = false;
+    reconnectAttempt.value = 0;
+    status.value = "idle";
     adapter.value?.disconnect();
     adapter.value = null;
-  });
+  };
+
+  const sendActiveMessage = async () => {
+    await chatStore.sendMessage();
+  };
 
   return {
     connect,
+    disconnect,
     endpoint: CHAT_SOCKET_ENDPOINT,
     sendActiveMessage,
     status,

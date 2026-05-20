@@ -5,6 +5,9 @@ import { useProfilesStore } from "@/features/profile/model/profiles-store";
 import {
   employmentTypeOptions,
   languageLevelOptions,
+  mentoringChannelOptions,
+  mentoringDurationOptions,
+  mentoringTypeOptions,
   skillLevelOptions,
   workFormatOptions
 } from "@/shared/lib/options";
@@ -18,8 +21,21 @@ export type StudentProfileSectionId =
   | "languages"
   | "files";
 
+export type MentorProfileSectionId =
+  | "main"
+  | "about"
+  | "format"
+  | "skills"
+  | "recruitment";
+
 export interface StudentProfileSection {
   id: StudentProfileSectionId;
+  title: string;
+  summary: string;
+}
+
+export interface MentorProfileSection {
+  id: MentorProfileSectionId;
   title: string;
   summary: string;
 }
@@ -39,12 +55,20 @@ export const studentProfileSections: StudentProfileSection[] = [
   { id: "files", title: "Файлы", summary: "Резюме и материалы профиля" }
 ];
 
+export const mentorProfileSections: MentorProfileSection[] = [
+  { id: "main", title: "Основное", summary: "Имя, позиция, город и контакты" },
+  { id: "about", title: "Описание", summary: "О себе, ожидания и помощь" },
+  { id: "format", title: "Формат", summary: "Тип, канал и длительность менторства" },
+  { id: "skills", title: "Навыки", summary: "Направления, по которым вы менторите" },
+  { id: "recruitment", title: "Набор", summary: "Статус, лимит и частота встреч" }
+];
+
 export const useProfile = () => {
   const dictionariesStore = useDictionariesStore();
   const profilesStore = useProfilesStore();
 
   const { cities, languages, skills } = storeToRefs(dictionariesStore);
-  const { isStudentDirty, studentForm, studentProfile } = storeToRefs(profilesStore);
+  const { isStudentDirty, mentorForm, studentForm, studentProfile } = storeToRefs(profilesStore);
 
   const getCityLabel = (cityId: string) => {
     const city = cities.value.find((item) => String(item.id) === cityId);
@@ -108,6 +132,50 @@ export const useProfile = () => {
 
   const nextTasks = computed(() => completionTasks.value.filter((task) => !task.done).slice(0, 3));
 
+  const mentorCompletionTasks = computed<CompletionTask[]>(() => [
+    {
+      id: "main",
+      label: "Заполнить имя, фамилию, позицию и город",
+      done: Boolean(
+        mentorForm.value.firstName.trim() &&
+          mentorForm.value.lastName.trim() &&
+          mentorForm.value.position.trim() &&
+          mentorForm.value.cityId
+      )
+    },
+    {
+      id: "about",
+      label: "Добавить описание и чем можете помочь",
+      done: Boolean(mentorForm.value.description.trim().length >= 40 && mentorForm.value.canHelpWith.trim())
+    },
+    {
+      id: "format",
+      label: "Настроить формат менторства",
+      done: Boolean(
+        mentorForm.value.mentoringType &&
+          mentorForm.value.mentoringChannel &&
+          mentorForm.value.mentoringDuration
+      )
+    },
+    {
+      id: "skills",
+      label: "Добавить минимум 3 навыка",
+      done: mentorForm.value.skills.length >= 3
+    },
+    {
+      id: "recruitment",
+      label: "Указать статус набора и лимит",
+      done: Boolean(mentorForm.value.recruitmentStatus && mentorForm.value.menteeLimit)
+    }
+  ]);
+
+  const mentorCompletionPercent = computed(() => {
+    const doneCount = mentorCompletionTasks.value.filter((task) => task.done).length;
+    return Math.round((doneCount / mentorCompletionTasks.value.length) * 100);
+  });
+
+  const mentorNextTasks = computed(() => mentorCompletionTasks.value.filter((task) => !task.done).slice(0, 3));
+
   const preview = computed(() => ({
     fullName: `${studentForm.value.firstName} ${studentForm.value.lastName}`.trim() || "Имя студента",
     city: getCityLabel(studentForm.value.cityId),
@@ -127,12 +195,36 @@ export const useProfile = () => {
     }))
   }));
 
+  const mentorPreview = computed(() => ({
+    fullName: `${mentorForm.value.firstName} ${mentorForm.value.lastName}`.trim() || "Имя ментора",
+    city: getCityLabel(mentorForm.value.cityId),
+    position: mentorForm.value.position || "Позиция ментора",
+    about: mentorForm.value.description || "Описание появится здесь по мере заполнения профиля.",
+    skills: mentorForm.value.skills.map((skill) => ({
+      id: skill.skillId,
+      label: getSkillLabel(skill.skillId),
+      level: getOptionLabel(skillLevelOptions, skill.level)
+    })),
+    workFormats: [
+      getOptionLabel(mentoringTypeOptions, mentorForm.value.mentoringType),
+      getOptionLabel(mentoringChannelOptions, mentorForm.value.mentoringChannel),
+      getOptionLabel(mentoringDurationOptions, mentorForm.value.mentoringDuration)
+    ],
+    employmentTypes: mentorForm.value.department ? [mentorForm.value.department] : [],
+    languages: []
+  }));
+
   return {
     completionPercent,
     completionTasks,
     getLanguageLabel,
     getSkillLabel,
     hasUnsavedStudentChanges: isStudentDirty,
+    mentorCompletionPercent,
+    mentorCompletionTasks,
+    mentorNextTasks,
+    mentorPreview,
+    mentorProfileSections,
     nextTasks,
     preview,
     studentProfileSections

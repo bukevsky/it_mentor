@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useFilesStore } from "@/features/files/model/files-store";
@@ -18,12 +19,23 @@ const {
   error,
   fileCategories,
   formatFileSize,
+  isLoading,
   isUploading,
   successMessage,
   totalSize,
   uploadToActiveCategory,
   visibleFiles
 } = useFiles();
+
+watch(
+  isAuthenticated,
+  (nextValue) => {
+    if (nextValue) {
+      void filesStore.loadFiles();
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -85,12 +97,16 @@ const {
             </div>
 
             <FileList
+              v-if="!isLoading"
               :files="visibleFiles"
               @download="filesStore.download"
               @delete="filesStore.remove"
               @replace="filesStore.replace"
               @retry="filesStore.retry"
             />
+            <div v-else class="empty-state file-list__empty">
+              Загружаем файлы...
+            </div>
           </main>
         </div>
       </article>

@@ -22,6 +22,7 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
   const results = ref<PagedResponse<MentorCardResponse> | null>(null);
   const selectedMentor = ref<MentorCardResponse | null>(null);
   const requestedMentorIds = ref<Set<number>>(new Set());
+  let searchRequestId = 0;
 
   const excludedRequestStatuses: MentoringRequestStatus[] = [
     "SENT",
@@ -34,7 +35,7 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
   const searchForm = reactive({
     q: "",
     cityId: "",
-    skillId: "",
+    skillIds: [] as string[],
     recruitmentStatus: "",
     mentoringType: "",
     mentoringChannel: ""
@@ -46,6 +47,9 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
   });
 
   const mentorsCount = computed(() => results.value?.totalElements ?? 0);
+
+  const getSelectedSkillIds = () =>
+    Array.isArray(searchForm.skillIds) ? searchForm.skillIds : [];
 
   const loadRequestedMentors = async () => {
     const response = await mentoringApi.getList({
@@ -65,13 +69,15 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
       return;
     }
 
+    const currentRequestId = searchRequestId + 1;
+    searchRequestId = currentRequestId;
     isLoading.value = true;
     error.value = null;
 
     const params: MentorSearchParams = {
       q: searchForm.q || undefined,
       cityId: searchForm.cityId ? Number(searchForm.cityId) : undefined,
-      skillIds: searchForm.skillId ? [Number(searchForm.skillId)] : undefined,
+      skillIds: getSelectedSkillIds().length ? getSelectedSkillIds().map(Number) : undefined,
       recruitmentStatus: searchForm.recruitmentStatus || undefined,
       mentoringType: searchForm.mentoringType || undefined,
       mentoringChannel: searchForm.mentoringChannel || undefined,
@@ -85,11 +91,18 @@ export const useMentorDirectoryStore = defineStore("mentor-directory", () => {
         mentorProfileApi.search(params),
         loadRequestedMentors()
       ]);
-      results.value = mentorResults;
+
+      if (currentRequestId === searchRequestId) {
+        results.value = mentorResults;
+      }
     } catch (rawError) {
-      error.value = normalizeErrorResponse(rawError, "/profiles/mentors");
+      if (currentRequestId === searchRequestId) {
+        error.value = normalizeErrorResponse(rawError, "/profiles/mentors");
+      }
     } finally {
-      isLoading.value = false;
+      if (currentRequestId === searchRequestId) {
+        isLoading.value = false;
+      }
     }
   };
 

@@ -36,7 +36,8 @@ export const fileCategories: FileCategory[] = [
   {
     kind: "chat-attachment",
     label: "Вложения",
-    description: "Файлы для чата"
+    description: "Изображения, PDF, TXT, ZIP, DOC/XLS",
+    accept: "image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,.doc,.docx,.xls,.xlsx"
   }
 ];
 
@@ -64,7 +65,7 @@ const sortFiles = (files: ManagedFile[]) => {
 
 export const useFiles = () => {
   const filesStore = useFilesStore();
-  const { activeKind, currentUpload, error, files, isUploading, successMessage } = storeToRefs(filesStore);
+  const { activeKind, currentUpload, error, files, isLoading, isUploading, successMessage } = storeToRefs(filesStore);
 
   const activeCategory = computed(() => {
     return fileCategories.find((category) => category.kind === activeKind.value) ?? fileCategories[0];
@@ -107,6 +108,7 @@ export const useFiles = () => {
     files,
     formatFileSize,
     getFileKindLabel,
+    isLoading,
     isUploading,
     successMessage,
     totalSize,

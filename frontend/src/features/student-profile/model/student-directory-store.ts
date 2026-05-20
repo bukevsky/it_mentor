@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import type {
   ErrorResponse,
   MentoringRequestCreateRequest,
+  MentoringRequestStatus,
   PagedResponse,
   StudentProfileResponse,
   StudentSearchParams
@@ -20,11 +21,21 @@ export const useStudentDirectoryStore = defineStore("student-directory", () => {
   const isLoading = ref(false);
   const results = ref<PagedResponse<StudentProfileResponse> | null>(null);
   const selectedStudent = ref<StudentProfileResponse | null>(null);
+  const requestedStudentIds = ref<Set<number>>(new Set());
+  let searchRequestId = 0;
+
+  const activeRequestStatuses: MentoringRequestStatus[] = [
+    "SENT",
+    "REVIEWING",
+    "NEEDS_CLARIFICATION",
+    "ACCEPTED",
+    "COMPLETED"
+  ];
 
   const searchForm = reactive({
     q: "",
     cityId: "",
-    skillId: "",
+    skillIds: [] as string[],
     employmentType: "",
     workFormat: ""
   });
@@ -36,18 +47,36 @@ export const useStudentDirectoryStore = defineStore("student-directory", () => {
 
   const studentsCount = computed(() => results.value?.totalElements ?? 0);
 
+  const getSelectedSkillIds = () =>
+    Array.isArray(searchForm.skillIds) ? searchForm.skillIds : [];
+
+  const loadRequestedStudents = async () => {
+    const response = await mentoringApi.getList({
+      page: 0,
+      size: 100
+    });
+
+    requestedStudentIds.value = new Set(
+      response.content
+        .filter((request) => activeRequestStatuses.includes(request.status))
+        .map((request) => request.studentProfileId)
+    );
+  };
+
   const searchStudents = async () => {
     if (!authStore.isAuthenticated) {
       return;
     }
 
+    const currentRequestId = searchRequestId + 1;
+    searchRequestId = currentRequestId;
     isLoading.value = true;
     error.value = null;
 
     const params: StudentSearchParams = {
       q: searchForm.q || undefined,
       cityId: searchForm.cityId ? Number(searchForm.cityId) : undefined,
-      skillIds: searchForm.skillId ? [Number(searchForm.skillId)] : undefined,
+      skillIds: getSelectedSkillIds().length ? getSelectedSkillIds().map(Number) : undefined,
       employmentType: searchForm.employmentType || undefined,
       workFormat: searchForm.workFormat || undefined,
       page: 0,
@@ -56,17 +85,33 @@ export const useStudentDirectoryStore = defineStore("student-directory", () => {
     };
 
     try {
-      results.value = await studentProfileApi.search(params);
+      const [studentResults] = await Promise.all([
+        studentProfileApi.search(params),
+        loadRequestedStudents()
+      ]);
+
+      if (currentRequestId === searchRequestId) {
+        results.value = studentResults;
+      }
     } catch (rawError) {
-      error.value = normalizeErrorResponse(rawError, "/profiles/students");
+      if (currentRequestId === searchRequestId) {
+        error.value = normalizeErrorResponse(rawError, "/profiles/students");
+      }
     } finally {
-      isLoading.value = false;
+      if (currentRequestId === searchRequestId) {
+        isLoading.value = false;
+      }
     }
   };
 
   const selectStudent = (student: StudentProfileResponse) => {
     selectedStudent.value = student;
     successMessage.value = "";
+    error.value = null;
+  };
+
+  const clearSelectedStudent = () => {
+    selectedStudent.value = null;
     error.value = null;
   };
 
@@ -79,7 +124,7 @@ export const useStudentDirectoryStore = defineStore("student-directory", () => {
         message: "Сначала выберите студента.",
         path: "/mentoring/requests"
       };
-      return;
+      return false;
     }
 
     isLoading.value = true;
@@ -94,20 +139,27 @@ export const useStudentDirectoryStore = defineStore("student-directory", () => {
 
     try {
       await mentoringApi.create(payload);
+      requestedStudentIds.value = new Set([...requestedStudentIds.value, selectedStudent.value.id]);
       successMessage.value = "Приглашение отправлено.";
+      selectedStudent.value = null;
+      return true;
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/mentoring/requests");
+      return false;
     } finally {
       isLoading.value = false;
     }
   };
 
   return {
+    clearSelectedStudent,
     error,
     isLoading,
     requestForm,
+    requestedStudentIds,
     results,
     searchForm,
+    loadRequestedStudents,
     searchStudents,
     selectedStudent,
     selectStudent,

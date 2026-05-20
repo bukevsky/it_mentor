@@ -8,33 +8,17 @@ import type {
 } from "@/shared/api/contracts";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { mentoringApi } from "@/features/mentoring/api/mentoring-api";
-import { reviewsApi } from "../api/reviews-api";
 import { normalizeErrorResponse } from "@/shared/lib/api-errors";
 import { fullName } from "@/shared/lib/presenters";
+import { reviewsApi } from "../api/reviews-api";
 
-const mapReviewableRequest = (
-  request: MentoringRequestResponse,
-  isMentor: boolean
-): ReviewableRequest => {
-  const participant = isMentor
-    ? {
-        id: request.studentProfile.id,
-        name: fullName(request.studentProfile),
-        role: "STUDENT" as const
-      }
-    : {
-        id: request.mentorProfile.id,
-        name: fullName(request.mentorProfile),
-        role: "MENTOR" as const
-      };
-
-  return {
-    id: request.id,
-    participant,
-    goalType: request.goalType,
-    completedAt: request.completedAt
-  };
-};
+const mapReviewableRequest = (request: MentoringRequestResponse): ReviewableRequest => ({
+  id: request.id,
+  mentorProfileId: request.mentorProfileId,
+  mentorName: fullName(request.mentorProfile),
+  goalType: request.goalType,
+  completedAt: request.completedAt
+});
 
 export const useCreateReview = () => {
   const authStore = useAuthStore();
@@ -44,10 +28,11 @@ export const useCreateReview = () => {
   const error = ref<ErrorResponse | null>(null);
   const successMessage = ref("");
 
-  const isMentor = computed(() => authStore.user?.roles.includes("MENTOR") ?? false);
+  const canCreateReviews = computed(() => authStore.user?.roles.includes("STUDENT") ?? false);
 
   const loadReviewableRequests = async () => {
-    if (!authStore.isAuthenticated) {
+    if (!authStore.isAuthenticated || !canCreateReviews.value) {
+      reviewableRequests.value = [];
       return;
     }
 
@@ -61,9 +46,7 @@ export const useCreateReview = () => {
         size: 100
       });
 
-      reviewableRequests.value = response.content.map((request) =>
-        mapReviewableRequest(request, isMentor.value)
-      );
+      reviewableRequests.value = response.content.map(mapReviewableRequest);
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/mentoring/requests?status=COMPLETED");
     } finally {
@@ -72,6 +55,17 @@ export const useCreateReview = () => {
   };
 
   const createReview = async (payload: ReviewCreateRequest): Promise<ReviewResponse | null> => {
+    if (!canCreateReviews.value) {
+      error.value = {
+        timestamp: new Date().toISOString(),
+        status: 403,
+        error: "FORBIDDEN",
+        message: "Оставлять отзывы могут только студенты.",
+        path: "/reviews"
+      };
+      return null;
+    }
+
     const request = reviewableRequests.value.find((item) => item.id === payload.mentoringRequestId);
 
     if (!request) {
@@ -90,12 +84,9 @@ export const useCreateReview = () => {
     successMessage.value = "";
 
     try {
-      const review = await reviewsApi.createReview(payload, request.participant, {
-        id: authStore.user?.id ?? 0,
-        name: "Вы",
-        role: isMentor.value ? "MENTOR" : "STUDENT"
-      });
-      successMessage.value = "Отзыв отправлен на модерацию.";
+      const review = await reviewsApi.createReview(payload);
+      reviewableRequests.value = reviewableRequests.value.filter((item) => item.id !== request.id);
+      successMessage.value = "Отзыв опубликован.";
       return review;
     } catch (rawError) {
       error.value = normalizeErrorResponse(rawError, "/reviews");
@@ -106,6 +97,7 @@ export const useCreateReview = () => {
   };
 
   return {
+    canCreateReviews,
     error,
     isLoadingRequests,
     isSubmitting,

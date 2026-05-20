@@ -1,23 +1,38 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { BaseButton, BaseSelect } from "conductor";
+import { useRoute } from "vue-router";
+import { BaseButton, BaseInput, BaseSelect } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useRequestsStore } from "@/features/mentoring/model/requests-store";
-import type { MentoringRequestResponse } from "@/shared/api/contracts";
+import { reviewsApi } from "@/features/reviews/api/reviews-api";
+import ReviewRating from "@/features/reviews/ui/ReviewRating.vue";
+import { ApiError } from "@/shared/api/http";
+import type { MentoringRequestResponse, ReviewResponse } from "@/shared/api/contracts";
 import {
   getAvailableRequestActions,
   getRequestCounters,
+  getRequestScope,
   getRequestStatusClass,
   getRequestStatusMeta,
+  requestScopeOptions,
   requestSortOptions,
   requestStatusFilterOptions
 } from "@/features/mentoring/model/request-triage";
 import { mentoringTypeOptions } from "@/shared/lib/options";
 import { formatDateTime, fullName, getOptionLabel } from "@/shared/lib/presenters";
 
+const route = useRoute();
 const authStore = useAuthStore();
 const requestsStore = useRequestsStore();
+const searchQuery = ref("");
+const activeReview = ref<ReviewResponse | null>(null);
+const isReviewLoading = ref(false);
+const isReviewSubmitting = ref(false);
+const reviewRating = ref(0);
+const reviewComment = ref("");
+const reviewError = ref("");
+const reviewSuccess = ref("");
 
 const { isAuthenticated, user } = storeToRefs(authStore);
 const {
@@ -33,7 +48,7 @@ const {
   visibleRequests
 } = storeToRefs(requestsStore);
 
-const counters = computed(() => getRequestCounters(requests.value));
+const counters = computed(() => getRequestCounters(requests.value, user.value?.roles ?? []));
 const activeStatusMeta = computed(() => getRequestStatusMeta(activeRequest.value?.status));
 const availableActions = computed(() =>
   getAvailableRequestActions(activeRequest.value, user.value?.roles ?? [])
@@ -43,7 +58,9 @@ const canAccept = computed(() => availableActions.value.includes("accept"));
 const canClarify = computed(() => availableActions.value.includes("clarify"));
 const canReject = computed(() => availableActions.value.includes("reject"));
 const canComplete = computed(() => availableActions.value.includes("complete"));
+const canCancel = computed(() => availableActions.value.includes("cancel"));
 const hasActions = computed(() => availableActions.value.length > 0);
+const isStudent = computed(() => user.value?.roles.includes("STUDENT") ?? false);
 const isInitialLoading = computed(() => isLoadingList.value && !requests.value.length);
 const isDetailLoading = computed(() => isLoadingDetail.value && !activeRequest.value);
 const activeGoalLabel = computed(() =>
@@ -64,26 +81,135 @@ const getRequestRecipient = (request: MentoringRequestResponse) => {
 
 const getRequestSenderName = (request: MentoringRequestResponse) => fullName(getRequestSender(request));
 const getRequestRecipientName = (request: MentoringRequestResponse) => fullName(getRequestRecipient(request));
+const getRequestPeerName = (request: MentoringRequestResponse) =>
+  getRequestScope(request, user.value?.roles ?? []) === "outgoing"
+    ? getRequestRecipientName(request)
+    : getRequestSenderName(request);
+const getRequestScopeLabel = (request: MentoringRequestResponse) =>
+  getRequestScope(request, user.value?.roles ?? []) === "outgoing" ? "Исходящая" : "Входящая";
 const previewText = (value: string) => value.trim() || "Сообщение не заполнено";
+const canShowReviewBlock = computed(() => activeRequest.value?.status === "COMPLETED");
+const canCreateReviewForActiveRequest = computed(() =>
+  canShowReviewBlock.value && isStudent.value && !activeReview.value
+);
+
+const resetReviewState = () => {
+  activeReview.value = null;
+  reviewRating.value = 0;
+  reviewComment.value = "";
+  reviewError.value = "";
+  reviewSuccess.value = "";
+};
+
+const loadActiveReview = async () => {
+  const request = activeRequest.value;
+
+  resetReviewState();
+
+  if (!request || request.status !== "COMPLETED") {
+    return;
+  }
+
+  isReviewLoading.value = true;
+
+  try {
+    activeReview.value = await reviewsApi.getByRequest(request.id);
+  } catch (rawError) {
+    if (rawError instanceof ApiError && rawError.status === 404) {
+      return;
+    }
+
+    reviewError.value = rawError instanceof Error ? rawError.message : "Не удалось загрузить отзыв.";
+  } finally {
+    isReviewLoading.value = false;
+  }
+};
+
+const submitReview = async () => {
+  const request = activeRequest.value;
+
+  if (!request || !canCreateReviewForActiveRequest.value) {
+    return;
+  }
+
+  if (!reviewRating.value) {
+    reviewError.value = "Поставьте оценку от 1 до 5.";
+    return;
+  }
+
+  isReviewSubmitting.value = true;
+  reviewError.value = "";
+  reviewSuccess.value = "";
+
+  try {
+    activeReview.value = await reviewsApi.createReview({
+      mentoringRequestId: request.id,
+      rating: reviewRating.value,
+      comment: reviewComment.value.trim() || null
+    });
+    reviewComment.value = "";
+    reviewSuccess.value = "Отзыв сохранён.";
+  } catch (rawError) {
+    reviewError.value = rawError instanceof Error ? rawError.message : "Не удалось сохранить отзыв.";
+  } finally {
+    isReviewSubmitting.value = false;
+  }
+};
+
+const searchedVisibleRequests = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+
+  if (!query) {
+    return visibleRequests.value;
+  }
+
+  return visibleRequests.value.filter((request) => {
+    const haystack = [
+      getRequestSenderName(request),
+      getRequestRecipientName(request),
+      request.message,
+      getOptionLabel(mentoringTypeOptions, request.goalType),
+      getRequestStatusMeta(request.status).label
+    ].join(" ").toLowerCase();
+
+    return haystack.includes(query);
+  });
+});
 
 watch(
-  () => isAuthenticated.value,
-  (nextValue) => {
-    if (!nextValue) {
+  () => user.value?.id ?? null,
+  (nextUserId) => {
+    searchQuery.value = "";
+    requestsStore.resetFilters();
+
+    if (!nextUserId) {
       requestsStore.clearActiveRequest();
       return;
     }
 
-    void requestsStore.loadRequests();
+    void requestsStore.loadRequests().then(() => {
+      const qId = route.query.requestId;
+      if (qId && typeof qId === "string") {
+        void requestsStore.openRequest(Number(qId));
+      }
+    });
   },
   { immediate: true }
 );
 
 watch(
-  () => [requestsStore.filters.status, requestsStore.filters.sortOrder],
+  () => [requestsStore.filters.status, requestsStore.filters.scope, requestsStore.filters.sortOrder],
   () => {
     void requestsStore.selectFirstVisibleRequest();
   }
+);
+
+watch(
+  () => [activeRequest.value?.id, activeRequest.value?.status] as const,
+  () => {
+    void loadActiveReview();
+  },
+  { immediate: true }
 );
 </script>
 
@@ -98,30 +224,77 @@ watch(
         {{ successMessage }}
       </div>
 
+      <header class="requests-hero">
+        <div class="requests-hero__text">
+          <h1 class="workspace-title">Заявки</h1>
+          <p class="workspace-subtitle">
+            Управляйте входящими запросами и отслеживайте отправленные приглашения.
+          </p>
+        </div>
+      </header>
+
       <div class="request-workspace">
         <aside class="app-panel request-list-panel">
           <div class="request-list-panel__header">
-            <div>
-              <h3 class="section-title">Заявки</h3>
-              <p class="section-copy">Очередь для быстрого разбора входящих запросов.</p>
+            <div class="request-list-panel__toolbar">
+              <BaseButton
+                class="mobile-refresh"
+                variant="secondary"
+                size="m"
+                :label="isLoadingList ? 'Обновление...' : 'Обновить'"
+                :loading="isLoadingList"
+                :disabled="isLoadingList || isSubmitting"
+                @click="requestsStore.loadRequests"
+              />
             </div>
 
             <div class="request-counters" aria-label="Счетчики заявок">
-              <span class="request-counter">
+              <button
+                type="button"
+                class="request-counter"
+                :class="{ 'request-counter--active': requestsStore.filters.scope === 'all' }"
+                @click="requestsStore.filters.scope = 'all'"
+              >
                 <strong>{{ counters.total }}</strong>
                 всего
-              </span>
-              <span class="request-counter request-counter--info">
-                <strong>{{ counters.new }}</strong>
-                новые
-              </span>
-              <span class="request-counter request-counter--warning">
-                <strong>{{ counters.reviewing }}</strong>
-                на рассмотрении
+              </button>
+              <button
+                type="button"
+                class="request-counter request-counter--info"
+                :class="{ 'request-counter--active': requestsStore.filters.scope === 'incoming' }"
+                @click="requestsStore.filters.scope = 'incoming'"
+              >
+                <strong>{{ counters.incoming }}</strong>
+                входящие
+              </button>
+              <button
+                type="button"
+                class="request-counter request-counter--warning"
+                :class="{ 'request-counter--active': requestsStore.filters.scope === 'outgoing' }"
+                @click="requestsStore.filters.scope = 'outgoing'"
+              >
+                <strong>{{ counters.outgoing }}</strong>
+                исходящие
+              </button>
+              <span class="request-counter request-counter--success">
+                <strong>{{ counters.accepted }}</strong>
+                принятые
               </span>
             </div>
 
+            <BaseInput
+              v-model="searchQuery"
+              title=""
+              start-icon="search"
+              placeholder="Поиск по имени, цели или сообщению..."
+            />
+
             <div class="request-filter-grid">
+              <BaseSelect
+                v-model="requestsStore.filters.scope"
+                title="Тип"
+                :options="requestScopeOptions"
+              />
               <BaseSelect
                 v-model="requestsStore.filters.status"
                 title="Статус"
@@ -134,15 +307,6 @@ watch(
                 :options="requestSortOptions"
               />
             </div>
-
-            <BaseButton
-              variant="secondary"
-              size="m"
-              :label="isLoadingList ? 'Обновление...' : 'Обновить'"
-              :loading="isLoadingList"
-              :disabled="isLoadingList || isSubmitting"
-              @click="requestsStore.loadRequests"
-            />
           </div>
 
           <div v-if="isInitialLoading" class="empty-state request-panel-state">
@@ -153,13 +317,13 @@ watch(
             {{ error.message }}
           </div>
 
-          <div v-else-if="!visibleRequests.length" class="empty-state request-panel-state">
+          <div v-else-if="!searchedVisibleRequests.length" class="empty-state request-panel-state">
             По выбранным условиям заявок нет.
           </div>
 
           <div v-else class="compact-list request-list">
             <button
-              v-for="request in visibleRequests"
+              v-for="request in searchedVisibleRequests"
               :key="request.id"
               type="button"
               :class="[
@@ -170,8 +334,8 @@ watch(
             >
               <div class="request-list-item__top">
                 <div class="request-list-item__name-block">
-                  <span>Кому</span>
-                  <strong class="request-list-item__name">{{ getRequestRecipientName(request) }}</strong>
+                  <span>{{ getRequestScopeLabel(request) }}</span>
+                  <strong class="request-list-item__name">{{ getRequestPeerName(request) }}</strong>
                 </div>
                 <span
                   class="status-pill"
@@ -191,7 +355,19 @@ watch(
           </div>
         </aside>
 
-        <article class="app-panel request-detail-panel">
+        <article
+          class="app-panel request-detail-panel"
+          :class="{ 'request-detail-panel--open': !!activeRequest }"
+        >
+          <button
+            v-if="activeRequest"
+            type="button"
+            class="request-detail-close"
+            @click="requestsStore.clearActiveRequest()"
+          >
+            ← Назад к заявкам
+          </button>
+
           <div v-if="isDetailLoading" class="empty-state request-detail-state">
             Загружаем детали заявки...
           </div>
@@ -211,6 +387,7 @@ watch(
                 @click="requestsStore.filters.status = ''"
               />
               <BaseButton
+                class="mobile-refresh"
                 size="m"
                 label="Обновить"
                 :loading="isLoadingList"
@@ -222,8 +399,15 @@ watch(
 
           <template v-else>
             <div class="request-detail-panel__header">
-              <div>
-                <h3 class="section-title">Заявка #{{ activeRequest.id }}</h3>
+              <div class="request-detail-panel__person">
+                <div class="avatar request-detail-panel__avatar">
+                  {{ getRequestPeerName(activeRequest).slice(0, 1) }}
+                </div>
+                <div>
+                  <p class="section-kicker">{{ getRequestScopeLabel(activeRequest) }} заявка #{{ activeRequest.id }}</p>
+                  <h3 class="section-title">{{ getRequestPeerName(activeRequest) }}</h3>
+                  <p class="helper-text">{{ activeGoalLabel }} · {{ formatDateTime(activeRequest.createdAt) }}</p>
+                </div>
               </div>
               <span
                 class="status-pill"
@@ -246,6 +430,10 @@ watch(
                 <div class="request-summary-card__item">
                   <span>Цель</span>
                   <strong>{{ activeGoalLabel }}</strong>
+                </div>
+                <div class="request-summary-card__item">
+                  <span>Тип</span>
+                  <strong>{{ getRequestScopeLabel(activeRequest) }}</strong>
                 </div>
                 <div class="request-summary-card__item">
                   <span>Создана</span>
@@ -291,6 +479,58 @@ watch(
                 </div>
               </section>
 
+              <section v-if="canShowReviewBlock" class="request-info-block request-review-block">
+                <div class="request-review-block__header">
+                  <div>
+                    <p class="section-kicker">Отзыв о менторе</p>
+                    <h3 class="section-title">Оценка по завершённой заявке</h3>
+                  </div>
+                  <span v-if="reviewSuccess" class="status-pill status-pill--success">{{ reviewSuccess }}</span>
+                </div>
+
+                <div v-if="isReviewLoading" class="panel-state">Загружаем отзыв...</div>
+
+                <div v-else-if="activeReview" class="request-review-card">
+                  <ReviewRating :value="activeReview.rating" readonly />
+                  <p>{{ activeReview.comment || "Комментарий не заполнен." }}</p>
+                  <span class="helper-text">
+                    Оставлен {{ formatDateTime(activeReview.createdAt) }}
+                  </span>
+                </div>
+
+                <form
+                  v-else-if="canCreateReviewForActiveRequest"
+                  class="request-review-form"
+                  @submit.prevent="submitReview"
+                >
+                  <div class="review-form__rating">
+                    <span>Оценка</span>
+                    <ReviewRating v-model="reviewRating" :show-number="false" />
+                  </div>
+                  <label class="field request-action-field">
+                    <span>Комментарий</span>
+                    <textarea
+                      v-model="reviewComment"
+                      rows="4"
+                      placeholder="Что было полезно? Что можно улучшить?"
+                    />
+                  </label>
+                  <BaseButton
+                    size="m"
+                    type="submit"
+                    :loading="isReviewSubmitting"
+                    :disabled="isReviewSubmitting"
+                    label="Сохранить отзыв"
+                  />
+                </form>
+
+                <div v-else class="empty-state empty-state--compact">
+                  <p>Студент ещё не оставил отзыв по этой заявке.</p>
+                </div>
+
+                <p v-if="reviewError" class="form-error">{{ reviewError }}</p>
+              </section>
+
               <label
                 v-if="actionMode === 'clarify'"
                 class="field request-action-field"
@@ -334,6 +574,16 @@ watch(
               </div>
 
               <div v-if="actionMode === 'idle'" class="request-action-bar__buttons">
+                <BaseButton
+                  v-if="canCancel"
+                  class="request-button--danger"
+                  variant="secondary"
+                  size="m"
+                  label="Отозвать"
+                  :loading="isSubmitting"
+                  :disabled="isSubmitting"
+                  @click="requestsStore.cancelRequest"
+                />
                 <BaseButton
                   v-if="canAccept"
                   size="m"

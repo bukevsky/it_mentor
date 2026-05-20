@@ -7,9 +7,13 @@ defineProps<{
   reviews: ReviewResponse[];
   mentorOptions: Array<{ value: string; label: string }>;
   mentorId: string;
+  mentorName: string;
+  currentUserId?: number;
   sort: ReviewSort;
   isLoading?: boolean;
+  isLoadingMentors?: boolean;
   errorMessage?: string;
+  hideMentorFilter?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -24,13 +28,15 @@ const emit = defineEmits<{
     <div class="reviews-feed__toolbar">
       <div>
         <h2 class="section-title">Отзывы</h2>
-        <p class="section-copy">Фильтруйте по ментору и смотрите свежие оценки качества.</p>
+        <p class="section-copy">
+          {{ hideMentorFilter ? "Свежие оценки и комментарии по вашему менторству." : "Фильтруйте по ментору и смотрите свежие оценки качества." }}
+        </p>
       </div>
       <div class="reviews-feed__filters">
-        <label class="select-shell">
+        <label v-if="!hideMentorFilter" class="select-shell">
           <span>Ментор</span>
           <select :value="mentorId" @change="emit('update:mentorId', ($event.target as HTMLSelectElement).value)">
-            <option value="">Все менторы</option>
+            <option value="" disabled>Выберите ментора</option>
             <option v-for="mentor in mentorOptions" :key="mentor.value" :value="mentor.value">
               {{ mentor.label }}
             </option>
@@ -46,7 +52,12 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <div v-if="isLoading" class="panel-state">Загружаем отзывы...</div>
+    <div v-if="isLoadingMentors && !hideMentorFilter" class="panel-state">Загружаем менторов...</div>
+    <div v-else-if="!hideMentorFilter && !mentorOptions.length" class="empty-state">
+      <h3>Менторы не найдены</h3>
+      <p>Когда появятся профили менторов, здесь можно будет читать отзывы.</p>
+    </div>
+    <div v-else-if="isLoading" class="panel-state">Загружаем отзывы...</div>
     <div v-else-if="errorMessage" class="error-state">
       <p>{{ errorMessage }}</p>
       <button class="link-button" type="button" @click="emit('retry')">Повторить</button>
@@ -56,7 +67,13 @@ const emit = defineEmits<{
       <p>Когда завершатся заявки и появятся оценки, они будут здесь.</p>
     </div>
     <div v-else class="reviews-feed__list">
-      <ReviewItem v-for="review in reviews" :key="review.id" :review="review" />
+      <ReviewItem
+        v-for="review in reviews"
+        :key="review.id"
+        :review="review"
+        :mentor-name="mentorName"
+        :current-user-id="currentUserId"
+      />
     </div>
   </section>
 </template>

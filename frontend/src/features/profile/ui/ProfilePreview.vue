@@ -10,6 +10,7 @@ defineProps<{
     employmentTypes: string[];
     languages: Array<{ id: string; label: string; level: string }>;
   };
+  avatarSrc?: string | null;
 }>();
 </script>
 
@@ -17,7 +18,8 @@ defineProps<{
   <aside class="profile-live-preview">
     <div class="profile-live-preview__cover"></div>
     <div class="profile-live-preview__avatar">
-      {{ preview.fullName.slice(0, 1).toUpperCase() }}
+      <img v-if="avatarSrc" :src="avatarSrc" :alt="preview.fullName" />
+      <span v-else>{{ preview.fullName.slice(0, 1).toUpperCase() }}</span>
     </div>
 
     <div class="profile-live-preview__body">

@@ -105,7 +105,7 @@ const routes: RouteRecordRaw[] = [
     component: ReviewsPage,
     meta: {
       requiresAuth: true,
-      roles: ["STUDENT", "MENTOR", "ADMIN"],
+      roles: ["MENTOR", "ADMIN"],
       title: "Отзывы",
       description: "Рейтинг менторов, отзывы и модерация обратной связи."
     }

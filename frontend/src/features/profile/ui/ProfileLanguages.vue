@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { BaseButton, BaseSelect } from "conductor";
 import type { StudentFormLanguage } from "@/features/profile/model/profiles-store";
+import ProfileSearchSelect from "@/features/profile/ui/ProfileSearchSelect.vue";
 import { languageLevelOptions } from "@/shared/lib/options";
 
 const props = defineProps<{
@@ -37,14 +38,13 @@ const addLanguage = () => {
 
 <template>
   <div class="profile-skills">
-    <div class="profile-skills__add">
-      <BaseSelect
+    <div class="profile-languages__add">
+      <ProfileSearchSelect
         v-model="selectedLanguageId"
-        size="m"
         title="Язык"
         placeholder="Выберите язык"
-        :state="selectState"
         :options="availableLanguageOptions"
+        :select-state="selectState"
       />
       <BaseSelect v-model="selectedLevel" size="m" title="Уровень" :options="languageLevelOptions" />
       <BaseButton

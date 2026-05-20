@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { BaseButton } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useChatStore } from "@/features/chat/model/chat-store";
@@ -12,16 +12,20 @@ import ChatInput from "@/features/chat/ui/ChatInput.vue";
 import ChatList from "@/features/chat/ui/ChatList.vue";
 import ChatMessages from "@/features/chat/ui/ChatMessages.vue";
 
-defineProps<{
+const props = defineProps<{
   sidebarToggleLabel?: string;
   sidebarToggleIcon?: string;
   isSidebarVisible?: boolean;
+  isMobile?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: "toggle-sidebar"): void;
 }>();
 
+const isMobileChatOpen = ref(false);
+
+const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const chatStore = useChatStore();
@@ -32,6 +36,7 @@ const {
   isLoadingChats,
   isLoadingMessages,
   isSending,
+  isUploadingAttachment,
   successMessage
 } = storeToRefs(chatStore);
 const {
@@ -55,6 +60,17 @@ const hasNewMessagesBelow = ref(false);
 
 const openRequests = () => {
   void router.push({ name: "requests" });
+};
+
+const handleOpenChat = (chatId: number) => {
+  void chatStore.loadMessages(chatId);
+  if (props.isMobile) {
+    isMobileChatOpen.value = true;
+  }
+};
+
+const handleBackToList = () => {
+  isMobileChatOpen.value = false;
 };
 
 const getThreadFeed = () => chatBodyRef.value?.querySelector<HTMLElement>(".chat-thread-feed") ?? null;
@@ -91,6 +107,14 @@ const handleSendMessage = () => {
   void scrollThreadToBottom();
 };
 
+const handleAttachmentFile = (file: File | null) => {
+  if (file) {
+    void chatStore.uploadAttachment(file);
+  } else {
+    chatStore.clearAttachment();
+  }
+};
+
 watch(
   () => isAuthenticated.value,
   (nextValue) => {
@@ -100,6 +124,19 @@ watch(
 
     void chatStore.loadChats();
     void chatSocket.connect();
+  },
+  { immediate: true }
+);
+
+watch(
+  () => route.query.chatId,
+  (chatId) => {
+    if (chatId && typeof chatId === "string") {
+      void chatStore.loadMessages(Number(chatId));
+      if (props.isMobile) {
+        isMobileChatOpen.value = true;
+      }
+    }
   },
   { immediate: true }
 );
@@ -138,17 +175,10 @@ watch(
       </div>
 
       <div class="chat-workspace">
-        <aside class="chat-left-column">
-          <div class="chat-sidebar-toolbar">
-            <BaseButton
-              variant="secondary"
-              size="m"
-              :start-icon="sidebarToggleIcon"
-              :label="sidebarToggleLabel || 'Скрыть меню'"
-              @click="emit('toggle-sidebar')"
-            />
-          </div>
-
+        <aside
+          class="chat-left-column"
+          :class="{ 'chat-left-column--mobile-hidden': isMobileChatOpen && props.isMobile }"
+        >
           <ChatList
             :items="dialogItems"
             :search-query="searchQuery"
@@ -156,12 +186,24 @@ watch(
             :has-loaded="hasLoadedChats"
             :has-any-chats="hasAnyChats"
             @update:search-query="searchQuery = $event"
-            @open="chatStore.loadMessages"
+            @open="handleOpenChat"
             @open-requests="openRequests"
           />
         </aside>
 
-        <article class="app-panel chat-window-panel" :class="{ 'chat-window-panel--empty': !activeChat }">
+        <article
+          class="app-panel chat-window-panel"
+          :class="{
+            'chat-window-panel--empty': !activeChat,
+            'chat-window-panel--mobile-hidden': !isMobileChatOpen && props.isMobile
+          }"
+        >
+          <div v-if="props.isMobile && activeChat" class="chat-mobile-back">
+            <button type="button" class="chat-mobile-back__btn" @click="handleBackToList">
+              ← Назад
+            </button>
+          </div>
+
           <ChatHeader
             v-if="activeChat"
             :chat="activeChat"
@@ -196,9 +238,13 @@ watch(
 
             <ChatInput
               :body="form.body"
+              :attachment-file="form.attachmentFile"
+              :is-uploading-attachment="isUploadingAttachment"
+              :attachment-uploaded="form.attachmentFileId !== null"
               :disabled="!canSendMessage"
               :is-sending="isSending"
               @update:body="form.body = $event"
+              @update:attachment-file="handleAttachmentFile"
               @send="handleSendMessage"
             />
           </div>

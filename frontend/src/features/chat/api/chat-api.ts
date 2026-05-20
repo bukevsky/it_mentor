@@ -22,10 +22,24 @@ export const chatApi = {
       `/chats/${chatId}/messages${buildQuery(params)}`
     );
   },
+  getMessagesCursor(chatId: number, params: { beforeMessageId?: number; limit?: number } = {}) {
+    return request<ChatMessageResponse[]>(`/chats/${chatId}/messages/cursor${buildQuery(params)}`);
+  },
   sendMessage(chatId: number, payload: SendMessageRequest) {
     return request<ChatMessageResponse>(`/chats/${chatId}/messages`, {
       method: "POST",
       body: payload
+    });
+  },
+  markAsRead(chatId: number) {
+    return request<void>(`/chats/${chatId}/read`, {
+      method: "POST"
+    });
+  },
+  sendTyping(chatId: number, typing: boolean) {
+    return request<void>(`/chats/${chatId}/typing`, {
+      method: "POST",
+      body: { typing }
     });
   }
 };

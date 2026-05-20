@@ -6,10 +6,12 @@ import { BaseButton, BaseInput, BaseSelect, Tabs } from "conductor";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { useDictionariesStore } from "@/features/dictionaries/model/dictionaries-store";
 import { useProfilesStore } from "@/features/profile/model/profiles-store";
-import { useProfile, type StudentProfileSectionId } from "@/features/profile/model/use-profile";
+import { useProfile, type MentorProfileSectionId, type StudentProfileSectionId } from "@/features/profile/model/use-profile";
 import ProfileAbout from "@/features/profile/ui/ProfileAbout.vue";
+import ProfileAvatarUploader from "@/features/profile/ui/ProfileAvatarUploader.vue";
 import ProfileLanguages from "@/features/profile/ui/ProfileLanguages.vue";
 import ProfilePreview from "@/features/profile/ui/ProfilePreview.vue";
+import ProfileSearchSelect from "@/features/profile/ui/ProfileSearchSelect.vue";
 import ProfileSection from "@/features/profile/ui/ProfileSection.vue";
 import ProfileSkills from "@/features/profile/ui/ProfileSkills.vue";
 import ProfileWorkPreferences from "@/features/profile/ui/ProfileWorkPreferences.vue";
@@ -17,8 +19,7 @@ import {
   mentoringChannelOptions,
   mentoringDurationOptions,
   mentoringTypeOptions,
-  recruitmentStatusOptions,
-  skillLevelOptions
+  recruitmentStatusOptions
 } from "@/shared/lib/options";
 
 const router = useRouter();
@@ -29,9 +30,11 @@ const profilesStore = useProfilesStore();
 const { isAuthenticated, user } = storeToRefs(authStore);
 const { cities, error: dictionariesError, isLoaded, isLoading, languages, skills } = storeToRefs(dictionariesStore);
 const {
+  avatarPreviewUrl,
   error,
   isBusy,
   isStudentDirty,
+  isUploadingAvatar,
   mentorForm,
   mode,
   preferredMode,
@@ -42,12 +45,18 @@ const {
   completionPercent,
   completionTasks,
   hasUnsavedStudentChanges,
+  mentorCompletionPercent,
+  mentorCompletionTasks,
+  mentorNextTasks,
+  mentorPreview,
+  mentorProfileSections,
   nextTasks,
   preview,
   studentProfileSections
 } = useProfile();
 
 const activeStudentSection = ref<StudentProfileSectionId>("main");
+const activeMentorSection = ref<MentorProfileSectionId>("main");
 
 const availableModes = computed(() => {
   return preferredMode.value === "mentor" ? ["Ментор"] : ["Студент"];
@@ -116,8 +125,30 @@ const isSectionComplete = (sectionId: StudentProfileSectionId) => {
   return completionTasks.value.find((task) => task.id === sectionId)?.done;
 };
 
+const isMentorSectionComplete = (sectionId: MentorProfileSectionId) => {
+  return mentorCompletionTasks.value.find((task) => task.id === sectionId)?.done;
+};
+
+const studentFullName = computed(() => `${studentForm.value.firstName} ${studentForm.value.lastName}`.trim() || "Имя студента");
+const mentorFullName = computed(() => `${mentorForm.value.firstName} ${mentorForm.value.lastName}`.trim() || "Имя ментора");
+
 const saveStudentProfile = async () => {
   await profilesStore.saveStudentProfile();
+};
+
+const refreshProfile = async () => {
+  if (mode.value === "student") {
+    await profilesStore.loadStudentProfile();
+  } else {
+    await profilesStore.loadMentorProfile();
+  }
+
+  await profilesStore.loadAvatar();
+};
+
+const logout = () => {
+  authStore.logout();
+  void router.push({ name: "auth" });
 };
 
 watch(
@@ -154,9 +185,16 @@ watch(
               <BaseButton
                 variant="secondary"
                 size="m"
+                class="btn-logout"
+                label="Выйти"
+                @click="logout"
+              />
+              <BaseButton
+                variant="secondary"
+                size="m"
                 :label="isBusy ? 'Загрузка...' : 'Обновить'"
                 :loading="isBusy"
-                @click="mode === 'student' ? profilesStore.loadStudentProfile() : profilesStore.loadMentorProfile()"
+                @click="refreshProfile"
               />
               <BaseButton
                 size="m"
@@ -184,6 +222,12 @@ watch(
         <div class="student-profile-layout">
           <main class="student-profile-editor">
             <article class="app-panel profile-completion-panel">
+              <ProfileAvatarUploader
+                :full-name="studentFullName"
+                :avatar-src="avatarPreviewUrl"
+                :is-uploading="isUploadingAvatar"
+                @upload="profilesStore.uploadAvatar"
+              />
               <div class="workspace-header">
                 <div>
                   <p class="section-kicker">Заполненность</p>
@@ -225,13 +269,12 @@ watch(
                     <BaseInput v-model="studentForm.lastName" title="Фамилия" placeholder="Фамилия" />
                   </div>
                   <div class="form-grid form-grid--two conductor-grid">
-                    <BaseSelect
+                    <ProfileSearchSelect
                       v-model="studentForm.cityId"
-                      size="m"
                       title="Город"
                       placeholder="Не выбран"
-                      :state="citySelectState"
                       :options="cityOptions"
+                      :select-state="citySelectState"
                     />
                     <BaseInput
                       v-model="studentForm.desiredPosition"
@@ -290,61 +333,147 @@ watch(
             </div>
           </main>
 
-          <ProfilePreview :preview="preview" />
+          <ProfilePreview :preview="preview" :avatar-src="avatarPreviewUrl" />
         </div>
       </template>
 
-      <div v-else class="profile-form-grid">
-        <article class="app-panel">
-          <p class="section-kicker">Ментор</p>
-          <h3 class="section-title">Профиль ментора</h3>
+      <template v-else>
+        <div class="student-profile-layout">
+          <main class="student-profile-editor">
+            <article class="app-panel profile-completion-panel">
+              <ProfileAvatarUploader
+                :full-name="mentorFullName"
+                :avatar-src="avatarPreviewUrl"
+                :is-uploading="isUploadingAvatar"
+                @upload="profilesStore.uploadAvatar"
+              />
+              <div class="workspace-header">
+                <div>
+                  <p class="section-kicker">Заполненность</p>
+                  <h3 class="section-title">{{ mentorCompletionPercent }}%</h3>
+                </div>
+                <span class="profile-save-pill">Профиль ментора</span>
+              </div>
+              <div class="progress-card__bar progress-card__bar--contrast">
+                <div class="progress-card__fill" :style="{ width: `${mentorCompletionPercent}%` }"></div>
+              </div>
+              <ul class="profile-checklist">
+                <li
+                  v-for="task in mentorCompletionTasks"
+                  :key="task.id"
+                  :class="{ 'profile-checklist__item--done': task.done }"
+                >
+                  <span></span>
+                  {{ task.label }}
+                </li>
+              </ul>
+              <p v-if="mentorNextTasks.length" class="section-copy">
+                Ближайший шаг: {{ mentorNextTasks[0].label }}.
+              </p>
+            </article>
 
-          <div class="form-grid mt-6">
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput v-model="mentorForm.firstName" title="Имя" />
-              <BaseInput v-model="mentorForm.lastName" title="Фамилия" />
+            <div class="profile-section-stack">
+              <ProfileSection
+                v-for="section in mentorProfileSections"
+                :key="section.id"
+                :title="section.title"
+                :summary="section.summary"
+                :is-open="activeMentorSection === section.id"
+                :is-complete="isMentorSectionComplete(section.id)"
+                @open="activeMentorSection = section.id"
+              >
+                <div v-if="section.id === 'main'" class="student-section-grid">
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseInput v-model="mentorForm.firstName" title="Имя" />
+                    <BaseInput v-model="mentorForm.lastName" title="Фамилия" />
+                  </div>
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseInput v-model="mentorForm.position" title="Позиция" />
+                    <BaseInput v-model="mentorForm.department" title="Департамент" />
+                  </div>
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <ProfileSearchSelect
+                      v-model="mentorForm.cityId"
+                      title="Город"
+                      placeholder="Не выбран"
+                      :options="cityOptions"
+                      :select-state="citySelectState"
+                    />
+                    <BaseInput v-model="mentorForm.phone" title="Телефон" />
+                  </div>
+                </div>
+
+                <div v-else-if="section.id === 'about'" class="student-section-grid">
+                  <label class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
+                    <span class="base-input__title">Описание</span>
+                    <span class="input">
+                      <textarea v-model="mentorForm.description" placeholder="Расскажите о своём опыте и стиле менторства."></textarea>
+                    </span>
+                  </label>
+                  <label class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
+                    <span class="base-input__title">С чем можете помочь</span>
+                    <span class="input">
+                      <textarea v-model="mentorForm.canHelpWith" placeholder="Например: ревью резюме, подготовка к собеседованиям, архитектура frontend-приложений."></textarea>
+                    </span>
+                  </label>
+                  <label class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
+                    <span class="base-input__title">Ожидания от менти</span>
+                    <span class="input">
+                      <textarea v-model="mentorForm.expectations" placeholder="Что важно подготовить до первой встречи."></textarea>
+                    </span>
+                  </label>
+                  <label class="profile-input-shell base-input base-input__default base-input__size-m">
+                    <span class="base-input__title">Контакт для связи</span>
+                    <span class="input"><input v-model="mentorForm.max" placeholder="@username или ссылка" /></span>
+                  </label>
+                </div>
+
+                <div v-else-if="section.id === 'format'" class="student-section-grid">
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseSelect v-model="mentorForm.mentoringType" size="m" title="Тип" :options="mentoringTypeOptions" />
+                    <BaseSelect v-model="mentorForm.mentoringChannel" size="m" title="Канал" :options="mentoringChannelOptions" />
+                  </div>
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseSelect v-model="mentorForm.mentoringDuration" size="m" title="Длительность" :options="mentoringDurationOptions" />
+                    <label class="profile-input-shell base-input base-input__default base-input__size-m">
+                      <span class="base-input__title">Частота встреч</span>
+                      <span class="input"><input v-model="mentorForm.mentoringFrequency" placeholder="2 раза в неделю" /></span>
+                    </label>
+                  </div>
+                </div>
+
+                <ProfileSkills
+                  v-else-if="section.id === 'skills'"
+                  :skills="mentorForm.skills"
+                  :skill-options="skillOptions"
+                  :select-state="skillSelectState"
+                  picker-title="Навыки"
+                  picker-placeholder="Выберите навыки"
+                  empty-text="Выберите навыки, по которым вы готовы менторить."
+                  default-level="CONFIDENT"
+                  @add="profilesStore.addMentorSkill"
+                  @remove="profilesStore.removeMentorSkill"
+                  @update-level="profilesStore.updateMentorSkillLevel"
+                />
+
+                <div v-else class="student-section-grid">
+                  <div class="form-grid form-grid--two conductor-grid">
+                    <BaseSelect v-model="mentorForm.recruitmentStatus" size="m" title="Статус набора" :options="recruitmentStatusOptions" />
+                    <label class="profile-input-shell base-input base-input__default base-input__size-m">
+                      <span class="base-input__title">Лимит менти</span>
+                      <span class="input">
+                        <input v-model.number="mentorForm.menteeLimit" type="number" min="1" max="20" />
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </ProfileSection>
             </div>
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseInput v-model="mentorForm.position" title="Позиция" />
-              <BaseInput v-model="mentorForm.department" title="Департамент" />
-            </div>
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect
-                v-model="mentorForm.cityId"
-                size="m"
-                title="Город"
-                placeholder="Не выбран"
-                :state="citySelectState"
-                :options="cityOptions"
-              />
-              <BaseInput v-model="mentorForm.phone" title="Телефон" />
-            </div>
-            <div class="profile-input-shell profile-input-shell--textarea base-input base-input__default base-input__size-m">
-              <label class="base-input__title">Описание</label>
-              <div class="input"><textarea v-model="mentorForm.description"></textarea></div>
-            </div>
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect v-model="mentorForm.mentoringType" size="m" title="Тип" :options="mentoringTypeOptions" />
-              <BaseSelect v-model="mentorForm.mentoringChannel" size="m" title="Канал" :options="mentoringChannelOptions" />
-            </div>
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect v-model="mentorForm.mentoringDuration" size="m" title="Длительность" :options="mentoringDurationOptions" />
-              <BaseSelect v-model="mentorForm.recruitmentStatus" size="m" title="Статус набора" :options="recruitmentStatusOptions" />
-            </div>
-            <div class="form-grid form-grid--two conductor-grid">
-              <BaseSelect
-                v-model="mentorForm.skillId"
-                size="m"
-                title="Навык"
-                placeholder="Не выбран"
-                :state="skillSelectState"
-                :options="skillOptions"
-              />
-              <BaseSelect v-model="mentorForm.skillLevel" size="m" title="Уровень" :options="skillLevelOptions" />
-            </div>
-          </div>
-        </article>
-      </div>
+          </main>
+
+          <ProfilePreview :preview="mentorPreview" :avatar-src="avatarPreviewUrl" />
+        </div>
+      </template>
 
       <div v-if="successMessage" class="success-state mt-4">
         {{ successMessage }}

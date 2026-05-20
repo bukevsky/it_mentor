@@ -1,51 +1,137 @@
 import type { ChatMessageResponse } from "@/shared/api/contracts";
+import { env } from "@/shared/config/env";
+import { tokenStorage } from "@/shared/lib/token-storage";
 
-export const CHAT_SOCKET_ENDPOINT = "/ws/chats";
-export const USE_MOCK_CHAT_SOCKET = true;
+export const CHAT_SOCKET_ENDPOINT = "/chats/events";
 
-export interface ChatSocketPayload {
-  chatId: number;
-  senderUserId: number;
-  body: string | null;
-  attachmentFileId?: number | null;
-  tempId: string;
-}
+type ChatEventName = "chat.message.created" | "chat.read" | "chat.typing" | "presence.changed";
 
 export interface ChatSocketAdapter {
   connect(): Promise<void>;
   disconnect(): void;
   subscribe(chatId: number): void;
-  sendMessage(payload: ChatSocketPayload): Promise<ChatMessageResponse>;
   onMessage(handler: (message: ChatMessageResponse) => void): void;
   onDisconnect(handler: () => void): void;
 }
 
-export const createMockChatSocket = (): ChatSocketAdapter => {
-  let activeChatId: number | null = null;
+type ParsedSseEvent = {
+  event: ChatEventName | "";
+  data: string;
+};
+
+const parseEventBlock = (block: string): ParsedSseEvent => {
+  let event: ParsedSseEvent["event"] = "";
+  const data: string[] = [];
+
+  block.split(/\r?\n/).forEach((line) => {
+    if (!line || line.startsWith(":")) {
+      return;
+    }
+
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim() as ParsedSseEvent["event"];
+      return;
+    }
+
+    if (line.startsWith("data:")) {
+      data.push(line.slice("data:".length).trimStart());
+    }
+  });
+
+  return {
+    event,
+    data: data.join("\n")
+  };
+};
+
+export const createChatSseClient = (): ChatSocketAdapter => {
+  let abortController: AbortController | null = null;
   let messageHandler: ((message: ChatMessageResponse) => void) | null = null;
   let disconnectHandler: (() => void) | null = null;
+  let isManualDisconnect = false;
+
+  const handleEvent = (block: string) => {
+    const parsed = parseEventBlock(block);
+
+    if (parsed.event !== "chat.message.created" || !parsed.data) {
+      return;
+    }
+
+    try {
+      messageHandler?.(JSON.parse(parsed.data) as ChatMessageResponse);
+    } catch {
+      // Некорректное событие не должно обрывать весь SSE-поток.
+    }
+  };
+
+  const readStream = async (response: Response, signal: AbortSignal) => {
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+      throw new Error("SSE stream is unavailable");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      let separatorIndex = buffer.search(/\r?\n\r?\n/);
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex);
+        const separatorLength = buffer[separatorIndex] === "\r" ? 4 : 2;
+        buffer = buffer.slice(separatorIndex + separatorLength);
+        handleEvent(block);
+        separatorIndex = buffer.search(/\r?\n\r?\n/);
+      }
+    }
+  };
 
   return {
     async connect() {
-      await new Promise((resolve) => setTimeout(resolve, 240));
+      const token = tokenStorage.get();
+
+      if (!token) {
+        throw new Error("Missing access token");
+      }
+
+      isManualDisconnect = false;
+      abortController = new AbortController();
+
+      const response = await fetch(`${env.apiBaseUrl}${CHAT_SOCKET_ENDPOINT}`, {
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`
+        },
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        throw new Error(`SSE connection failed with status ${response.status}`);
+      }
+
+      void readStream(response, abortController.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (!isManualDisconnect && !abortController?.signal.aborted) {
+            disconnectHandler?.();
+          }
+        });
     },
     disconnect() {
-      disconnectHandler?.();
+      isManualDisconnect = true;
+      abortController?.abort();
+      abortController = null;
     },
-    subscribe(chatId: number) {
-      activeChatId = chatId;
-    },
-    async sendMessage(payload: ChatSocketPayload) {
-      await new Promise((resolve) => setTimeout(resolve, 520));
-
-      return {
-        id: Date.now(),
-        chatId: payload.chatId,
-        senderUserId: payload.senderUserId,
-        body: payload.body,
-        attachment: null,
-        createdAt: new Date().toISOString()
-      };
+    subscribe(_chatId: number) {
+      // SSE-подписка идёт сразу на все чаты пользователя; отдельная подписка не нужна.
     },
     onMessage(handler) {
       messageHandler = handler;

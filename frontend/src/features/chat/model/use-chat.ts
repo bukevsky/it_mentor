@@ -37,6 +37,7 @@ export const useChat = () => {
     isLoadingMessages,
     isOpeningByRequestId,
     isSending,
+    isUploadingAttachment,
     lastMessages,
     messages,
     optimisticMessages,
@@ -125,13 +126,7 @@ export const useChat = () => {
         const title = peer.name;
         const subtitle = `${peer.role} · заявка #${chat.mentoringRequestId}`;
         const preview = getDialogPreview(chat);
-        const unreadCount =
-          lastMessage &&
-          user.value?.id &&
-          lastMessage.senderUserId !== user.value.id &&
-          !readChatIds.value.has(chat.id)
-            ? 1
-            : 0;
+        const unreadCount = readChatIds.value.has(chat.id) ? 0 : chat.unreadCount;
 
         return {
           chat,
@@ -196,7 +191,8 @@ export const useChat = () => {
     return Boolean(
       activeChat.value &&
       !isSending.value &&
-      form.value.body.trim().length > 0
+      !isUploadingAttachment.value &&
+      (form.value.body.trim().length > 0 || form.value.attachmentFileId)
     );
   });
 

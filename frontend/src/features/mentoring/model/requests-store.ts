@@ -15,6 +15,7 @@ import {
   findNextRequestId,
   getRequestStatusMeta,
   type RequestActionMode,
+  type RequestScope,
   type RequestSortOrder
 } from "./request-triage";
 import { mentoringApi } from "../api/mentoring-api";
@@ -29,9 +30,11 @@ export const useRequestsStore = defineStore("requests", () => {
 
   const filters = reactive<{
     status: MentoringRequestStatus | "";
+    scope: RequestScope;
     sortOrder: RequestSortOrder;
   }>({
     status: "",
+    scope: "all",
     sortOrder: "newest"
   });
 
@@ -52,7 +55,9 @@ export const useRequestsStore = defineStore("requests", () => {
   let successTimer: ReturnType<typeof setTimeout> | null = null;
 
   const requests = computed(() => listResponse.value?.content ?? []);
-  const visibleRequests = computed(() => filterAndSortRequests(requests.value, filters));
+  const visibleRequests = computed(() =>
+    filterAndSortRequests(requests.value, filters, authStore.user?.roles ?? [])
+  );
   const isBusy = computed(() => isLoadingList.value || isLoadingDetail.value || isSubmitting.value);
 
   const clearSuccessSoon = () => {
@@ -74,6 +79,12 @@ export const useRequestsStore = defineStore("requests", () => {
   const resetActionMode = () => {
     actionMode.value = "idle";
     fieldErrors.value = {};
+  };
+
+  const resetFilters = () => {
+    filters.status = "";
+    filters.scope = "all";
+    filters.sortOrder = "newest";
   };
 
   const setActionMode = (mode: RequestActionMode) => {
@@ -288,6 +299,7 @@ export const useRequestsStore = defineStore("requests", () => {
     openRequest,
     requests,
     resetActionMode,
+    resetFilters,
     selectFirstVisibleRequest,
     setActionMode,
     submitClarification,

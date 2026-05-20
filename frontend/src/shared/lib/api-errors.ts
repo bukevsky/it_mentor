@@ -36,6 +36,10 @@ const getHttpErrorMessage = (status: number, fallbackMessage: string) => {
     return "Запрошенные данные не найдены.";
   }
 
+  if (status === 429) {
+    return "Слишком много попыток. Подождите минуту и попробуйте снова.";
+  }
+
   if (status >= 500) {
     return "Сервер не смог обработать запрос. Попробуйте позже.";
   }

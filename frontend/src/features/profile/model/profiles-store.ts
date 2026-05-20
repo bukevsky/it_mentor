@@ -12,6 +12,8 @@ import { useAuthStore } from "@/features/auth/model/auth-store";
 import { normalizeErrorResponse } from "@/shared/lib/api-errors";
 import { mentorProfileApi } from "@/features/mentor-profile/api/mentor-profile-api";
 import { studentProfileApi } from "@/features/student-profile/api/student-profile-api";
+import { filesApi } from "@/features/files/api/files-api";
+import { imageCache } from "@/features/files/model/image-cache";
 
 type ProfileMode = "student" | "mentor";
 
@@ -19,6 +21,8 @@ export interface StudentFormSkill {
   skillId: string;
   level: string;
 }
+
+export type MentorFormSkill = StudentFormSkill;
 
 export interface StudentFormLanguage {
   languageId: string;
@@ -35,6 +39,9 @@ export const useProfilesStore = defineStore("profiles", () => {
   const studentProfile = ref<StudentProfileResponse | null>(null);
   const mentorProfile = ref<MentorProfileResponse | null>(null);
   const studentSavedState = ref("");
+  const avatarFileId = ref<number | null>(null);
+  const avatarPreviewUrl = ref<string | null>(null);
+  const isUploadingAvatar = ref(false);
 
   const studentForm = reactive({
     firstName: "",
@@ -71,8 +78,7 @@ export const useProfilesStore = defineStore("profiles", () => {
     mentoringFrequency: "2 раза в неделю",
     menteeLimit: 3,
     recruitmentStatus: "OPEN",
-    skillId: "",
-    skillLevel: "CONFIDENT"
+    skills: [] as MentorFormSkill[]
   });
 
   const canUseProfiles = computed(() => authStore.isAuthenticated);
@@ -144,8 +150,10 @@ export const useProfilesStore = defineStore("profiles", () => {
     mentorForm.mentoringFrequency = profile.mentoringFrequency ?? "2 раза в неделю";
     mentorForm.menteeLimit = profile.menteeLimit ?? 3;
     mentorForm.recruitmentStatus = profile.recruitmentStatus ?? "OPEN";
-    mentorForm.skillId = profile.skills[0]?.skill.id ? String(profile.skills[0].skill.id) : "";
-    mentorForm.skillLevel = profile.skills[0]?.level ?? "CONFIDENT";
+    mentorForm.skills = profile.skills.map((skill) => ({
+      skillId: String(skill.skill.id),
+      level: skill.level
+    }));
   };
 
   const buildStudentPayload = (): StudentProfileRequest => {
@@ -167,15 +175,17 @@ export const useProfilesStore = defineStore("profiles", () => {
         ? [...studentForm.workFormats] as StudentProfileRequest["workFormats"]
         : null,
       languages: studentForm.languages.length
-        ? studentForm.languages.map((language) => ({
+        ? studentForm.languages.map((language, index) => ({
             languageId: Number(language.languageId),
-            level: language.level as StudentProfileRequest["languages"][number]["level"]
+            level: language.level as StudentProfileRequest["languages"][number]["level"],
+            position: index
           }))
         : null,
       skills: studentForm.skills.length
-        ? studentForm.skills.map((skill) => ({
+        ? studentForm.skills.map((skill, index) => ({
             skillId: Number(skill.skillId),
-            level: skill.level as StudentProfileRequest["skills"][number]["level"]
+            level: skill.level as StudentProfileRequest["skills"][number]["level"],
+            position: index
           }))
         : null
     };
@@ -200,13 +210,11 @@ export const useProfilesStore = defineStore("profiles", () => {
       mentoringDuration: mentorForm.mentoringDuration as MentorProfileRequest["mentoringDuration"],
       menteeLimit: mentorForm.menteeLimit || null,
       recruitmentStatus: mentorForm.recruitmentStatus as MentorProfileRequest["recruitmentStatus"],
-      skills: mentorForm.skillId
-        ? [
-            {
-              skillId: Number(mentorForm.skillId),
-              level: mentorForm.skillLevel as MentorProfileRequest["skills"][number]["level"]
-            }
-          ]
+      skills: mentorForm.skills.length
+        ? mentorForm.skills.map((skill) => ({
+            skillId: Number(skill.skillId),
+            level: skill.level as MentorProfileRequest["skills"][number]["level"]
+          }))
         : null
     };
   };
@@ -236,6 +244,26 @@ export const useProfilesStore = defineStore("profiles", () => {
 
   const updateStudentSkillLevel = (skillId: string, level: string) => {
     const target = studentForm.skills.find((skill) => skill.skillId === skillId);
+
+    if (target) {
+      target.level = level;
+    }
+  };
+
+  const addMentorSkill = (skillId: string, level: string) => {
+    if (!skillId || mentorForm.skills.some((skill) => skill.skillId === skillId)) {
+      return;
+    }
+
+    mentorForm.skills.push({ skillId, level });
+  };
+
+  const removeMentorSkill = (skillId: string) => {
+    mentorForm.skills = mentorForm.skills.filter((skill) => skill.skillId !== skillId);
+  };
+
+  const updateMentorSkillLevel = (skillId: string, level: string) => {
+    const target = mentorForm.skills.find((skill) => skill.skillId === skillId);
 
     if (target) {
       target.level = level;
@@ -276,7 +304,7 @@ export const useProfilesStore = defineStore("profiles", () => {
       patchStudentForm(response);
     } catch (rawError) {
       if (isProfileMissing(rawError)) {
-      studentProfile.value = null;
+        studentProfile.value = null;
         studentSavedState.value = studentFormState.value;
         return;
       }
@@ -284,6 +312,39 @@ export const useProfilesStore = defineStore("profiles", () => {
       error.value = normalizeErrorResponse(rawError, "/profile/student/me");
     } finally {
       isBusy.value = false;
+    }
+  };
+
+  const loadAvatar = async () => {
+    if (!canUseProfiles.value) {
+      return;
+    }
+
+    try {
+      const response = await filesApi.list({ type: "AVATAR", page: 0, size: 1, sort: "uploadedAt,desc" });
+      const avatar = response.content[0] ?? null;
+      avatarFileId.value = avatar?.id ?? null;
+      avatarPreviewUrl.value = avatar ? await imageCache.load(avatar.id, avatar.originalFilename) : null;
+    } catch {
+      avatarFileId.value = null;
+      avatarPreviewUrl.value = null;
+    }
+  };
+
+  const uploadAvatar = async (file: File) => {
+    isUploadingAvatar.value = true;
+    error.value = null;
+    successMessage.value = "";
+
+    try {
+      const response = await filesApi.uploadAvatar(file);
+      avatarFileId.value = response.id;
+      avatarPreviewUrl.value = imageCache.prime(response.id, file, response.originalFilename);
+      successMessage.value = "Аватар обновлён.";
+    } catch (rawError) {
+      error.value = normalizeErrorResponse(rawError, "/files/avatar");
+    } finally {
+      isUploadingAvatar.value = false;
     }
   };
 
@@ -356,26 +417,34 @@ export const useProfilesStore = defineStore("profiles", () => {
 
     if (preferredMode.value === "mentor") {
       await loadMentorProfile();
+      await loadAvatar();
       return;
     }
 
     await loadStudentProfile();
+    await loadAvatar();
   };
 
   return {
+    addMentorSkill,
     addStudentLanguage,
     addStudentSkill,
+    avatarFileId,
+    avatarPreviewUrl,
     canUseProfiles,
     error,
     initialize,
     isBusy,
     isStudentDirty,
+    isUploadingAvatar,
+    loadAvatar,
     loadMentorProfile,
     loadStudentProfile,
     mentorForm,
     mentorProfile,
     mode,
     preferredMode,
+    removeMentorSkill,
     removeStudentLanguage,
     removeStudentSkill,
     saveMentorProfile,
@@ -389,6 +458,8 @@ export const useProfilesStore = defineStore("profiles", () => {
     studentProfile,
     successMessage,
     toggleItem,
+    updateMentorSkillLevel,
+    uploadAvatar,
     updateStudentLanguageLevel,
     updateStudentSkillLevel
   };

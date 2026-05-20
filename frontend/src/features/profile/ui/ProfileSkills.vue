@@ -1,14 +1,26 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { BaseButton, BaseSelect } from "conductor";
+import { BaseSelect } from "conductor";
 import type { StudentFormSkill } from "@/features/profile/model/profiles-store";
+import ProfileSkillPicker from "@/features/profile/ui/ProfileSkillPicker.vue";
 import { skillLevelOptions } from "@/shared/lib/options";
 
-const props = defineProps<{
-  skills: StudentFormSkill[];
-  skillOptions: Array<{ value: string; label: string }>;
-  selectState: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    skills: StudentFormSkill[];
+    skillOptions: Array<{ value: string; label: string }>;
+    selectState: string;
+    pickerTitle?: string;
+    pickerPlaceholder?: string;
+    emptyText?: string;
+    defaultLevel?: string;
+  }>(),
+  {
+    pickerTitle: "Навыки",
+    pickerPlaceholder: "Выберите навыки",
+    emptyText: "Добавьте несколько навыков, чтобы ментор быстрее понял ваш фокус.",
+    defaultLevel: "INTERMEDIATE"
+  }
+);
 
 const emit = defineEmits<{
   (event: "add", skillId: string, level: string): void;
@@ -16,42 +28,27 @@ const emit = defineEmits<{
   (event: "update-level", skillId: string, level: string): void;
 }>();
 
-const selectedSkillId = ref("");
-const selectedLevel = ref("INTERMEDIATE");
-
-const availableSkillOptions = computed(() => {
-  const selectedIds = new Set(props.skills.map((skill) => skill.skillId));
-  return props.skillOptions.filter((option) => option.value && !selectedIds.has(option.value));
-});
-
 const getSkillLabel = (skillId: string) => {
   return props.skillOptions.find((option) => option.value === skillId)?.label ?? "Навык";
 };
 
-const addSkill = () => {
-  emit("add", selectedSkillId.value, selectedLevel.value);
-  selectedSkillId.value = "";
-  selectedLevel.value = "INTERMEDIATE";
+const addSkill = (skillId: string, level: string) => {
+  emit("add", skillId, level);
 };
 </script>
 
 <template>
   <div class="profile-skills">
     <div class="profile-skills__add">
-      <BaseSelect
-        v-model="selectedSkillId"
-        size="m"
-        title="Навык"
-        placeholder="Выберите навык"
-        :state="selectState"
-        :options="availableSkillOptions"
-      />
-      <BaseSelect v-model="selectedLevel" size="m" title="Уровень" :options="skillLevelOptions" />
-      <BaseButton
-        size="m"
-        label="Добавить"
-        :disabled="!selectedSkillId"
-        @click="addSkill"
+      <ProfileSkillPicker
+        :skills="skills"
+        :options="skillOptions"
+        :select-state="selectState"
+        :title="pickerTitle"
+        :placeholder="pickerPlaceholder"
+        :default-level="defaultLevel"
+        @add="addSkill"
+        @remove="emit('remove', $event)"
       />
     </div>
 
@@ -72,7 +69,7 @@ const addSkill = () => {
     </div>
 
     <div v-else class="empty-state profile-inline-empty">
-      Добавьте несколько навыков, чтобы ментор быстрее понял ваш фокус.
+      {{ emptyText }}
     </div>
   </div>
 </template>

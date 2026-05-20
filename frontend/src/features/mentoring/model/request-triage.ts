@@ -5,9 +5,10 @@ import type {
 } from "@/shared/api/contracts";
 import type { Option } from "@/shared/lib/options";
 
-export type RequestAction = "accept" | "clarify" | "reject" | "complete";
+export type RequestAction = "accept" | "clarify" | "reject" | "complete" | "cancel";
 export type RequestActionMode = "idle" | "clarify" | "reject";
 export type RequestSortOrder = "newest" | "oldest";
+export type RequestScope = "all" | "incoming" | "outgoing";
 export type RequestStatusTone = "neutral" | "info" | "warning" | "success" | "danger" | "muted";
 
 export interface RequestStatusMeta {
@@ -75,6 +76,12 @@ export const requestStatusFilterOptions: Array<Option<MentoringRequestStatus | "
   }))
 ];
 
+export const requestScopeOptions: Option<RequestScope>[] = [
+  { value: "all", label: "Все" },
+  { value: "incoming", label: "Входящие" },
+  { value: "outgoing", label: "Исходящие" }
+];
+
 export const getRequestStatusMeta = (
   status?: string | null
 ): RequestStatusMeta => {
@@ -109,9 +116,16 @@ export const getAvailableRequestActions = (
   const isRecipient =
     (request.direction === "STUDENT_TO_MENTOR" && roles.includes("MENTOR")) ||
     (request.direction === "MENTOR_TO_STUDENT" && roles.includes("STUDENT"));
+  const isInitiator =
+    (request.direction === "STUDENT_TO_MENTOR" && roles.includes("STUDENT")) ||
+    (request.direction === "MENTOR_TO_STUDENT" && roles.includes("MENTOR"));
 
   if (isRecipient && isTriageStatus(request.status)) {
     return ["accept", "clarify", "reject"];
+  }
+
+  if (isInitiator && isTriageStatus(request.status)) {
+    return ["cancel"];
   }
 
   if (request.status === "ACCEPTED") {
@@ -121,13 +135,30 @@ export const getAvailableRequestActions = (
   return [];
 };
 
+export const getRequestScope = (
+  request: MentoringRequestResponse,
+  roles: RoleCode[] = []
+): Exclude<RequestScope, "all"> => {
+  const isOutgoing =
+    (request.direction === "STUDENT_TO_MENTOR" && roles.includes("STUDENT")) ||
+    (request.direction === "MENTOR_TO_STUDENT" && roles.includes("MENTOR"));
+
+  return isOutgoing ? "outgoing" : "incoming";
+};
+
 export const filterAndSortRequests = (
   requests: MentoringRequestResponse[],
-  filters: { status: MentoringRequestStatus | ""; sortOrder: RequestSortOrder }
+  filters: { status: MentoringRequestStatus | ""; sortOrder: RequestSortOrder; scope?: RequestScope },
+  roles: RoleCode[] = []
 ) => {
-  const filtered = filters.status
-    ? requests.filter((request) => request.status === filters.status)
-    : requests;
+  const filtered = requests.filter((request) => {
+    const matchesStatus = filters.status ? request.status === filters.status : true;
+    const matchesScope = !filters.scope || filters.scope === "all"
+      ? true
+      : getRequestScope(request, roles) === filters.scope;
+
+    return matchesStatus && matchesScope;
+  });
 
   return [...filtered].sort((left, right) => {
     const leftTime = new Date(left.createdAt).getTime();
@@ -136,10 +167,13 @@ export const filterAndSortRequests = (
   });
 };
 
-export const getRequestCounters = (requests: MentoringRequestResponse[]) => ({
+export const getRequestCounters = (requests: MentoringRequestResponse[], roles: RoleCode[] = []) => ({
   total: requests.length,
   new: requests.filter((request) => request.status === "SENT").length,
-  reviewing: requests.filter((request) => request.status === "REVIEWING").length
+  reviewing: requests.filter((request) => request.status === "REVIEWING").length,
+  accepted: requests.filter((request) => request.status === "ACCEPTED").length,
+  incoming: requests.filter((request) => getRequestScope(request, roles) === "incoming").length,
+  outgoing: requests.filter((request) => getRequestScope(request, roles) === "outgoing").length
 });
 
 export const findNextRequestId = (

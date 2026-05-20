@@ -1,6 +1,7 @@
 import { reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type {
+  AttachmentInfo,
   ChatMessageResponse,
   ChatResponse,
   ErrorResponse,
@@ -10,6 +11,8 @@ import type {
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { mentoringApi } from "@/features/mentoring/api/mentoring-api";
 import { normalizeErrorResponse } from "@/shared/lib/api-errors";
+import { filesApi } from "@/features/files/api/files-api";
+import { imageCache } from "@/features/files/model/image-cache";
 import { chatApi } from "../api/chat-api";
 
 export type ChatDeliveryStatus = "sending" | "sent" | "error";
@@ -33,7 +36,10 @@ export const useChatStore = defineStore("chat", () => {
 
   const form = reactive({
     requestId: "",
-    body: ""
+    body: "",
+    attachmentFile: null as File | null,
+    attachmentFileId: null as number | null,
+    uploadedAttachment: null as AttachmentInfo | null
   });
 
   const chats = ref<PagedResponse<ChatResponse> | null>(null);
@@ -49,10 +55,45 @@ export const useChatStore = defineStore("chat", () => {
   const isLoadingMessages = ref(false);
   const isOpeningByRequestId = ref(false);
   const isSending = ref(false);
+  const isUploadingAttachment = ref(false);
   let successTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const sortChatsByActivity = (items: ChatResponse[]) => {
+    return [...items].sort((left, right) => {
+      const leftDate = left.lastMessageAt ?? left.lastMessage?.createdAt ?? left.createdAt;
+      const rightDate = right.lastMessageAt ?? right.lastMessage?.createdAt ?? right.createdAt;
+
+      return new Date(rightDate).getTime() - new Date(leftDate).getTime();
+    });
+  };
+
+  const upsertChat = (nextChat: ChatResponse) => {
+    const currentChats = chats.value?.content ?? [];
+    const exists = currentChats.some((chat) => chat.id === nextChat.id);
+    const content = exists
+      ? currentChats.map((chat) => (chat.id === nextChat.id ? nextChat : chat))
+      : [nextChat, ...currentChats];
+
+    chats.value = {
+      content: sortChatsByActivity(content),
+      page: chats.value?.page ?? 0,
+      size: chats.value?.size ?? Math.max(content.length, 1),
+      totalElements: exists ? chats.value?.totalElements ?? content.length : (chats.value?.totalElements ?? 0) + 1,
+      totalPages: chats.value?.totalPages ?? 1,
+      last: chats.value?.last ?? true
+    };
+  };
 
   const markChatRead = (chatId: number) => {
     readChatIds.value = new Set([...readChatIds.value, chatId]);
+    if (chats.value) {
+      chats.value = {
+        ...chats.value,
+        content: chats.value.content.map((chat) =>
+          chat.id === chatId ? { ...chat, unreadCount: 0 } : chat
+        )
+      };
+    }
   };
 
   const markChatUnread = (chatId: number) => {
@@ -75,6 +116,29 @@ export const useChatStore = defineStore("chat", () => {
   const setSuccess = (message: string) => {
     successMessage.value = message;
     clearSuccessSoon();
+  };
+
+  const reset = () => {
+    form.requestId = "";
+    form.body = "";
+    chats.value = null;
+    activeChat.value = null;
+    messages.value = null;
+    lastMessages.value = {};
+    requestDetails.value = {};
+    optimisticMessages.value = [];
+    readChatIds.value = new Set();
+    error.value = null;
+    successMessage.value = "";
+    isLoadingChats.value = false;
+    isLoadingMessages.value = false;
+    isOpeningByRequestId.value = false;
+    isSending.value = false;
+
+    if (successTimer) {
+      clearTimeout(successTimer);
+      successTimer = null;
+    }
   };
 
   const loadLastMessages = async (items: ChatResponse[]) => {
@@ -129,6 +193,10 @@ export const useChatStore = defineStore("chat", () => {
 
     try {
       chats.value = await chatApi.getChats({ page: 0, size: 100 });
+      chats.value = {
+        ...chats.value,
+        content: sortChatsByActivity(chats.value.content)
+      };
       await loadLastMessages(chats.value.content);
       await loadRequestDetails(chats.value.content);
 
@@ -156,6 +224,7 @@ export const useChatStore = defineStore("chat", () => {
       markChatRead(chatId);
       await loadRequestDetails([activeChat.value]);
       messages.value = await chatApi.getMessages(chatId, { page: 0, size: 80 });
+      void chatApi.markAsRead(chatId);
       lastMessages.value = {
         ...lastMessages.value,
         [chatId]: messages.value.content[0] ?? lastMessages.value[chatId] ?? null
@@ -189,16 +258,10 @@ export const useChatStore = defineStore("chat", () => {
       markChatRead(chat.id);
       await loadRequestDetails([chat]);
       messages.value = await chatApi.getMessages(chat.id, { page: 0, size: 80 });
+      void chatApi.markAsRead(chat.id);
 
       if (!chats.value?.content.some((item) => item.id === chat.id)) {
-        chats.value = {
-          content: [chat, ...(chats.value?.content ?? [])],
-          page: chats.value?.page ?? 0,
-          size: chats.value?.size ?? 100,
-          totalElements: (chats.value?.totalElements ?? 0) + 1,
-          totalPages: chats.value?.totalPages ?? 1,
-          last: chats.value?.last ?? true
-        };
+        upsertChat(chat);
       }
 
       lastMessages.value = {
@@ -225,7 +288,8 @@ export const useChatStore = defineStore("chat", () => {
     }
 
     const body = form.body.trim();
-    if (!body) {
+
+    if (!body && !form.attachmentFileId) {
       return;
     }
 
@@ -237,7 +301,7 @@ export const useChatStore = defineStore("chat", () => {
       chatId: chat.id,
       senderUserId: authStore.user?.id ?? 0,
       body: body || null,
-      attachment: null,
+      attachment: form.uploadedAttachment,
       createdAt: new Date().toISOString(),
       deliveryStatus: "sending"
     };
@@ -250,7 +314,7 @@ export const useChatStore = defineStore("chat", () => {
     try {
       const sentMessage = await chatApi.sendMessage(chat.id, {
         body: body || null,
-        attachmentFileId: null
+        attachmentFileId: form.attachmentFileId
       });
 
       optimisticMessages.value = optimisticMessages.value.map((message) =>
@@ -260,8 +324,27 @@ export const useChatStore = defineStore("chat", () => {
         ...lastMessages.value,
         [chat.id]: sentMessage
       };
+      if (chats.value) {
+        chats.value = {
+          ...chats.value,
+          content: sortChatsByActivity(
+            chats.value.content.map((item) =>
+              item.id === chat.id
+                ? {
+                    ...item,
+                    lastMessage: sentMessage,
+                    lastMessageAt: sentMessage.createdAt,
+                    lastSenderUserId: sentMessage.senderUserId
+                  }
+                : item
+            )
+          )
+        };
+      }
       form.body = "";
-      setSuccess("Сообщение отправлено.");
+      form.attachmentFile = null;
+      form.attachmentFileId = null;
+      form.uploadedAttachment = null;
       void loadChats();
     } catch (rawError) {
       optimisticMessages.value = optimisticMessages.value.map((message) =>
@@ -271,6 +354,40 @@ export const useChatStore = defineStore("chat", () => {
     } finally {
       isSending.value = false;
     }
+  };
+
+  const uploadAttachment = async (file: File) => {
+    form.attachmentFile = file;
+    form.attachmentFileId = null;
+    form.uploadedAttachment = null;
+    isUploadingAttachment.value = true;
+    error.value = null;
+
+    try {
+      const uploaded = await filesApi.uploadChatAttachment(file);
+      form.attachmentFileId = uploaded.id;
+      form.uploadedAttachment = {
+        fileId: uploaded.id,
+        originalFilename: uploaded.originalFilename,
+        contentType: uploaded.contentType,
+        size: uploaded.size
+      };
+
+      imageCache.prime(uploaded.id, file, uploaded.originalFilename);
+    } catch (rawError) {
+      form.attachmentFile = null;
+      form.uploadedAttachment = null;
+      error.value = normalizeErrorResponse(rawError, "/files/chat-attachment");
+    } finally {
+      isUploadingAttachment.value = false;
+    }
+  };
+
+  const clearAttachment = () => {
+    form.attachmentFile = null;
+    form.attachmentFileId = null;
+    form.uploadedAttachment = null;
+    isUploadingAttachment.value = false;
   };
 
   const createPendingMessage = () => {
@@ -331,15 +448,79 @@ export const useChatStore = defineStore("chat", () => {
       [message.chatId]: message
     };
 
+    const isKnownChat = chats.value?.content.some((chat) => chat.id === message.chatId) ?? false;
+
+    if (!isKnownChat) {
+      void chatApi.getById(message.chatId)
+        .then((chat) => {
+          const isIncoming = message.senderUserId !== authStore.user?.id;
+          const isActive = activeChat.value?.id === message.chatId;
+          upsertChat({
+            ...chat,
+            lastMessage: message,
+            lastMessageAt: message.createdAt,
+            lastSenderUserId: message.senderUserId,
+            unreadCount: isIncoming && !isActive ? Math.max(chat.unreadCount, 1) : chat.unreadCount
+          });
+          void loadRequestDetails([chat]);
+        })
+        .catch(() => undefined);
+    }
+
+    if (chats.value) {
+      chats.value = {
+        ...chats.value,
+        content: sortChatsByActivity(
+          chats.value.content.map((chat) => {
+            if (chat.id !== message.chatId) {
+              return chat;
+            }
+
+            const isIncoming = message.senderUserId !== authStore.user?.id;
+            const isActive = activeChat.value?.id === message.chatId;
+
+            return {
+              ...chat,
+              lastMessage: message,
+              lastMessageAt: message.createdAt,
+              lastSenderUserId: message.senderUserId,
+              unreadCount: isIncoming && !isActive ? chat.unreadCount + 1 : chat.unreadCount
+            };
+          })
+        )
+      };
+    }
+
     if (activeChat.value?.id === message.chatId) {
       const existingMessages = messages.value?.content ?? [];
       const alreadyExists = existingMessages.some((item) => item.id === message.id);
+      const optimisticMatchIndex = optimisticMessages.value.findIndex((item) => {
+        if (item.id === message.id) {
+          return true;
+        }
 
-      if (!alreadyExists) {
+        return (
+          item.deliveryStatus === "sending" &&
+          item.chatId === message.chatId &&
+          item.senderUserId === message.senderUserId &&
+          item.body === message.body
+        );
+      });
+
+      if (optimisticMatchIndex >= 0) {
+        optimisticMessages.value = optimisticMessages.value.map((item, index) =>
+          index === optimisticMatchIndex
+            ? { ...message, tempId: item.tempId, deliveryStatus: "sent" }
+            : item
+        );
+      }
+
+      if (!alreadyExists && optimisticMatchIndex < 0) {
         messages.value = toPagedResponse([...existingMessages, message]);
       }
 
       markChatRead(message.chatId);
+      void chatApi.markAsRead(message.chatId);
       return;
     }
 
@@ -349,6 +530,7 @@ export const useChatStore = defineStore("chat", () => {
   return {
     activeChat,
     chats,
+    clearAttachment,
     confirmPendingMessage,
     createPendingMessage,
     error,
@@ -358,16 +540,20 @@ export const useChatStore = defineStore("chat", () => {
     isLoadingMessages,
     isOpeningByRequestId,
     isSending,
+    isUploadingAttachment,
     lastMessages,
     loadChats,
     loadMessages,
+    markChatRead,
     messages,
     openByRequestId,
     optimisticMessages,
     readChatIds,
     receiveSocketMessage,
     requestDetails,
+    reset,
     sendMessage,
-    successMessage
+    successMessage,
+    uploadAttachment
   };
 });

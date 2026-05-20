@@ -30,9 +30,8 @@ const selectedRequest = computed(() =>
 watch(
   () => props.requests,
   (requests) => {
-    if (!selectedRequestId.value && requests.length) {
-      selectedRequestId.value = requests[0].id;
-    }
+    const selectedRequestStillExists = requests.some((request) => request.id === selectedRequestId.value);
+    selectedRequestId.value = selectedRequestStillExists ? selectedRequestId.value : (requests[0]?.id ?? null);
   },
   { immediate: true }
 );
@@ -59,16 +58,11 @@ const submit = () => {
     return;
   }
 
-  if (comment.value.trim().length < 10) {
-    localError.value = "Добавьте короткий комментарий, чтобы отзыв был полезным.";
-    return;
-  }
-
   localError.value = "";
   emit("submit", {
     mentoringRequestId: selectedRequest.value.id,
     rating: rating.value,
-    comment: comment.value.trim()
+    comment: comment.value.trim() || null
   });
 };
 </script>
@@ -96,14 +90,14 @@ const submit = () => {
           @change="selectedRequestId = Number(($event.target as HTMLSelectElement).value)"
         >
           <option v-for="request in requests" :key="request.id" :value="request.id">
-            #{{ request.id }} · {{ request.participant.name }}
+            #{{ request.id }} · {{ request.mentorName }}
           </option>
         </select>
       </label>
 
       <div v-if="selectedRequest" class="review-form__request">
         <strong>Заявка #{{ selectedRequest.id }}</strong>
-        <span>{{ selectedRequest.participant.name }} · {{ selectedRequest.participant.role === "MENTOR" ? "ментор" : "студент" }}</span>
+        <span>{{ selectedRequest.mentorName }} · ментор</span>
         <span>{{ getOptionLabel(mentoringTypeOptions, selectedRequest.goalType) }}</span>
         <span>{{ formatDateTime(selectedRequest.completedAt) }}</span>
       </div>

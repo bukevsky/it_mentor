@@ -24,19 +24,19 @@ const successMessage = ref("");
 const authTabs = [{ name: "Вход" }, { name: "Регистрация" }, { name: "Сброс пароля" }];
 
 const loginForm = reactive({
-  email: "student.demo@example.com",
-  password: "DemoPass123"
+  email: "",
+  password: ""
 });
 
 const registerForm = reactive({
-  email: "new.student@example.com",
-  password: "SecurePass123",
-  firstName: "Ярослав",
-  lastName: "Шилов"
+  email: "",
+  password: "",
+  firstName: "",
+  lastName: ""
 });
 
 const recoveryForm = reactive({
-  email: "student.demo@example.com",
+  email: "",
   code: "",
   newPassword: ""
 });
