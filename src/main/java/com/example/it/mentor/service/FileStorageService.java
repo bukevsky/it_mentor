@@ -71,6 +71,7 @@ public class FileStorageService implements FileStorage {
         String ext = extractExtension(originalFilename);
         String objectKey = type.name().toLowerCase() + "/" + UUID.randomUUID() + ext;
 
+        long startedAt = System.nanoTime();
         try (InputStream inputStream = file.getInputStream()) {
             minioClient.putObject(
                     PutObjectArgs.builder()
@@ -80,7 +81,8 @@ public class FileStorageService implements FileStorage {
                             .contentType(file.getContentType())
                             .build());
         } catch (Exception e) {
-            log.error("Ошибка при загрузке файла в MinIO: objectKey={}", objectKey, e);
+            log.error("Ошибка при загрузке файла в MinIO: objectKey={}, type={}, ownerId={}, durationMs={}, step={}",
+                    objectKey, type, ownerId, durationMs(startedAt), "file_upload_failed", e);
             throw new StorageException("Ошибка при загрузке файла: " + e.getMessage(), e);
         }
 
@@ -94,7 +96,8 @@ public class FileStorageService implements FileStorage {
                 .build();
 
         storedFile = storedFileRepository.save(storedFile);
-        log.info("Файл загружен: fileId={}, type={}, size={}, ownerId={}", storedFile.getId(), type, file.getSize(), ownerId);
+        log.info("Файл загружен: fileId={}, type={}, size={}, ownerId={}, durationMs={}, step={}",
+                storedFile.getId(), type, file.getSize(), ownerId, durationMs(startedAt), "file_uploaded");
 
         return new FileUploadResponse(
                 storedFile.getId(),
@@ -116,6 +119,7 @@ public class FileStorageService implements FileStorage {
             throw new ForbiddenException("Нет доступа к файлу");
         }
 
+        long startedAt = System.nanoTime();
         try {
             minioClient.removeObject(
                     RemoveObjectArgs.builder()
@@ -123,12 +127,14 @@ public class FileStorageService implements FileStorage {
                             .object(file.getStorageKey())
                             .build());
         } catch (Exception e) {
-            log.error("Ошибка при удалении файла из MinIO: storageKey={}", file.getStorageKey(), e);
+            log.error("Ошибка при удалении файла из MinIO: fileId={}, storageKey={}, requesterId={}, durationMs={}, step={}",
+                    fileId, file.getStorageKey(), requesterId, durationMs(startedAt), "file_delete_failed", e);
             throw new StorageException("Ошибка при удалении файла: " + e.getMessage(), e);
         }
 
         storedFileRepository.deleteById(fileId);
-        log.info("Файл удалён: fileId={}, storageKey={}, requesterId={}", fileId, file.getStorageKey(), requesterId);
+        log.info("Файл удалён: fileId={}, storageKey={}, requesterId={}, durationMs={}, step={}",
+                fileId, file.getStorageKey(), requesterId, durationMs(startedAt), "file_deleted");
     }
 
     @Override
@@ -149,6 +155,9 @@ public class FileStorageService implements FileStorage {
         } else {
             page = storedFileRepository.findByOwnerIdAndStatus(ownerId, FileStatus.ACTIVE, pageable);
         }
+        log.debug("Файлы пользователя загружены: ownerId={}, type={}, page={}, size={}, resultCount={}, total={}, step={}",
+                ownerId, type, pageable.getPageNumber(), pageable.getPageSize(), page.getNumberOfElements(),
+                page.getTotalElements(), "files_loaded");
         return PagedResponse.from(page.map(this::toFileResponse));
     }
 
@@ -170,15 +179,19 @@ public class FileStorageService implements FileStorage {
             }
         }
 
+        long startedAt = System.nanoTime();
         try {
             InputStream stream = minioClient.getObject(
                     GetObjectArgs.builder()
                             .bucket(storageProperties.getBucketName())
                             .object(file.getStorageKey())
                             .build());
+            log.info("Файл подготовлен к скачиванию: fileId={}, requesterId={}, ownerId={}, size={}, durationMs={}, step={}",
+                    fileId, requesterId, file.getOwnerId(), file.getSize(), durationMs(startedAt), "file_download_prepared");
             return new FileDownloadInfo(stream, file.getContentType(), file.getOriginalFilename(), file.getSize());
         } catch (Exception e) {
-            log.error("Ошибка при скачивании файла из MinIO: fileId={}", fileId, e);
+            log.error("Ошибка при скачивании файла из MinIO: fileId={}, requesterId={}, durationMs={}, step={}",
+                    fileId, requesterId, durationMs(startedAt), "file_download_failed", e);
             throw new StorageException("Ошибка при скачивании файла: " + e.getMessage(), e);
         }
     }
@@ -201,7 +214,8 @@ public class FileStorageService implements FileStorage {
         storedFileRepository.save(file);
 
         unlinkFromProfile(requesterId, file);
-        log.info("Файл помечен как удалённый: fileId={}, requesterId={}", fileId, requesterId);
+        log.info("Файл помечен как удалённый: fileId={}, requesterId={}, type={}, step={}",
+                fileId, requesterId, file.getFileType(), "file_soft_deleted");
     }
 
     @Override
@@ -226,6 +240,7 @@ public class FileStorageService implements FileStorage {
         String ext = extractExtension(originalFilename);
         String objectKey = type.name().toLowerCase() + "/" + UUID.randomUUID() + ext;
 
+        long startedAt = System.nanoTime();
         try (InputStream inputStream = newFile.getInputStream()) {
             minioClient.putObject(
                     PutObjectArgs.builder()
@@ -235,7 +250,8 @@ public class FileStorageService implements FileStorage {
                             .contentType(newFile.getContentType())
                             .build());
         } catch (Exception e) {
-            log.error("Ошибка при замене файла в MinIO: objectKey={}", objectKey, e);
+            log.error("Ошибка при замене файла в MinIO: oldFileId={}, objectKey={}, ownerId={}, durationMs={}, step={}",
+                    fileId, objectKey, ownerId, durationMs(startedAt), "file_replace_failed", e);
             throw new StorageException("Ошибка при замене файла: " + e.getMessage(), e);
         }
 
@@ -251,7 +267,8 @@ public class FileStorageService implements FileStorage {
 
         relinkToProfile(ownerId, type, newStored.getId());
 
-        log.info("Файл заменён: oldFileId={}, newFileId={}, type={}", fileId, newStored.getId(), type);
+        log.info("Файл заменён: oldFileId={}, newFileId={}, ownerId={}, type={}, size={}, durationMs={}, step={}",
+                fileId, newStored.getId(), ownerId, type, newFile.getSize(), durationMs(startedAt), "file_replaced");
         return toFileResponse(newStored);
     }
 
@@ -270,7 +287,10 @@ public class FileStorageService implements FileStorage {
                 .map(User::getAvatarFileId)
                 .orElse(null);
 
-        return new StudentFilesResponse(resume, portfolioCount, avatarFileId);
+        StudentFilesResponse response = new StudentFilesResponse(resume, portfolioCount, avatarFileId);
+        log.debug("Файлы студента загружены: userId={}, hasResume={}, portfolioCount={}, hasAvatar={}, step={}",
+                userId, resume != null, portfolioCount, avatarFileId != null, "student_files_loaded");
+        return response;
     }
 
     private void softDeleteExistingIfSingleType(Long ownerId, FileType type) {
@@ -282,7 +302,8 @@ public class FileStorageService implements FileStorage {
         for (StoredFile f : existing) {
             f.setStatus(FileStatus.DELETED);
             storedFileRepository.save(f);
-            log.debug("Старый {} помечен как удалённый: fileId={}", type, f.getId());
+            log.debug("Старый файл одиночного типа помечен как удалённый: fileId={}, ownerId={}, type={}, step={}",
+                    f.getId(), ownerId, type, "single_type_old_file_soft_deleted");
         }
     }
 
@@ -373,5 +394,9 @@ public class FileStorageService implements FileStorage {
             return "";
         }
         return filename.substring(filename.lastIndexOf('.'));
+    }
+
+    private static long durationMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

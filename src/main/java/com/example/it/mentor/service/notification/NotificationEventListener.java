@@ -87,17 +87,27 @@ public class NotificationEventListener {
     }
 
     private void handle(NotificationEvent event, String category) {
-        if (!notificationProperties.enabled()) return;
+        if (!notificationProperties.enabled()) {
+            log.debug("Уведомление пропущено: eventType={}, category={}, recipientUserId={}, reason={}, step={}",
+                    event.type(), category, event.recipientUserId(), "notifications_disabled", "notification_skipped");
+            return;
+        }
 
         if (!preferencesService.shouldNotify(event.recipientUserId(), category)) {
-            log.debug("Уведомление отключено пользователем: userId={}, eventType={}", event.recipientUserId(), event.type());
+            log.debug("Уведомление отключено пользователем: userId={}, eventType={}, category={}, step={}",
+                    event.recipientUserId(), event.type(), category, "notification_skipped_by_preferences");
             return;
         }
 
         Optional<EmailMessage> message = dispatcher.build(event);
         message.ifPresentOrElse(
-                msg -> outboxService.enqueue(msg, event.type()),
-                () -> log.warn("Письмо не сформировано: eventType={}", event.type())
+                msg -> {
+                    outboxService.enqueue(msg, event.type());
+                    log.debug("Уведомление поставлено в outbox: userId={}, eventType={}, category={}, step={}",
+                            event.recipientUserId(), event.type(), category, "notification_enqueued");
+                },
+                () -> log.warn("Письмо не сформировано: eventType={}, category={}, recipientUserId={}, step={}",
+                        event.type(), category, event.recipientUserId(), "notification_message_not_built")
         );
     }
 }

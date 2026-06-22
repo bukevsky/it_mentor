@@ -10,6 +10,7 @@ import com.example.it.mentor.repository.DictInteractionTypeRepository;
 import com.example.it.mentor.repository.DictLanguageRepository;
 import com.example.it.mentor.repository.DictSkillRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class DictionaryService {
 
     private final DictCityRepository cityRepository;
@@ -39,7 +41,9 @@ public class DictionaryService {
      */
     @Cacheable(value = "dictionaries", key = "'cities'")
     public List<CityResponse> getCities() {
-        return dictionaryMapper.toCityResponses(cityRepository.findByActiveTrueOrderByNameAsc());
+        List<CityResponse> cities = dictionaryMapper.toCityResponses(cityRepository.findByActiveTrueOrderByNameAsc());
+        logDictionaryRead("cities", cities.size());
+        return cities;
     }
 
     /**
@@ -49,7 +53,9 @@ public class DictionaryService {
      */
     @Cacheable(value = "dictionaries", key = "'skills'")
     public List<SkillResponse> getSkills() {
-        return dictionaryMapper.toSkillResponses(skillRepository.findByActiveTrueOrderByNameAsc());
+        List<SkillResponse> skills = dictionaryMapper.toSkillResponses(skillRepository.findByActiveTrueOrderByNameAsc());
+        logDictionaryRead("skills", skills.size());
+        return skills;
     }
 
     /**
@@ -59,7 +65,9 @@ public class DictionaryService {
      */
     @Cacheable(value = "dictionaries", key = "'languages'")
     public List<LanguageResponse> getLanguages() {
-        return dictionaryMapper.toLanguageResponses(languageRepository.findByActiveTrueOrderByNameAsc());
+        List<LanguageResponse> languages = dictionaryMapper.toLanguageResponses(languageRepository.findByActiveTrueOrderByNameAsc());
+        logDictionaryRead("languages", languages.size());
+        return languages;
     }
 
     /**
@@ -69,6 +77,14 @@ public class DictionaryService {
      */
     @Cacheable(value = "dictionaries", key = "'interactionTypes'")
     public List<InteractionTypeResponse> getInteractionTypes() {
-        return dictionaryMapper.toInteractionTypeResponses(interactionTypeRepository.findByActiveTrueOrderByNameAsc());
+        List<InteractionTypeResponse> interactionTypes = dictionaryMapper.toInteractionTypeResponses(
+                interactionTypeRepository.findByActiveTrueOrderByNameAsc());
+        logDictionaryRead("interactionTypes", interactionTypes.size());
+        return interactionTypes;
+    }
+
+    private void logDictionaryRead(String dictionary, int resultCount) {
+        log.debug("Справочник загружен: dictionary={}, resultCount={}, step={}",
+                dictionary, resultCount, "dictionary_loaded");
     }
 }

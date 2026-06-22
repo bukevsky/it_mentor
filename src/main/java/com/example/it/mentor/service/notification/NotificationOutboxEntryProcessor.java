@@ -27,6 +27,8 @@ public class NotificationOutboxEntryProcessor {
     public void process(Long entryId) {
         NotificationOutbox entry = outboxRepository.findById(entryId).orElse(null);
         if (entry == null || entry.getStatus() != NotificationOutboxStatus.PENDING) {
+            log.debug("Запись outbox пропущена: id={}, status={}, step={}",
+                    entryId, entry == null ? null : entry.getStatus(), "notification_outbox_entry_skipped");
             return;
         }
 
@@ -39,21 +41,26 @@ public class NotificationOutboxEntryProcessor {
             ));
             entry.setStatus(NotificationOutboxStatus.SENT);
             entry.setSentAt(OffsetDateTime.now());
-            log.info("Уведомление отправлено: id={}, to={}", entry.getId(), entry.getRecipientEmail());
+            log.info("Уведомление отправлено: id={}, to={}, eventType={}, attempts={}, sentAt={}, step={}",
+                    entry.getId(), entry.getRecipientEmail(), entry.getEventType(), entry.getAttempts(),
+                    entry.getSentAt(), "notification_sent");
         } catch (Exception e) {
             int attempts = entry.getAttempts() + 1;
             entry.setAttempts(attempts);
             entry.setLastError(truncate(e.getMessage(), 1000));
             if (attempts >= notificationProperties.outbox().maxAttempts()) {
                 entry.setStatus(NotificationOutboxStatus.FAILED);
-                log.error("Уведомление не доставлено (исчерпаны попытки): id={}, to={}",
-                        entry.getId(), entry.getRecipientEmail());
+                log.error("Уведомление не доставлено (исчерпаны попытки): id={}, to={}, eventType={}, attempts={}, " +
+                                "maxAttempts={}, step={}",
+                        entry.getId(), entry.getRecipientEmail(), entry.getEventType(), attempts,
+                        notificationProperties.outbox().maxAttempts(), "notification_failed", e);
             } else {
                 long delaySeconds = (long) notificationProperties.outbox().retryDelaySeconds()
                         * (1L << Math.min(attempts - 1, 5));
                 entry.setNextAttemptAt(OffsetDateTime.now().plusSeconds(delaySeconds));
-                log.warn("Повтор уведомления запланирован: id={}, attempts={}, nextAt={}",
-                        entry.getId(), attempts, entry.getNextAttemptAt());
+                log.warn("Повтор уведомления запланирован: id={}, to={}, eventType={}, attempts={}, nextAt={}, step={}",
+                        entry.getId(), entry.getRecipientEmail(), entry.getEventType(), attempts,
+                        entry.getNextAttemptAt(), "notification_retry_scheduled");
             }
         }
         outboxRepository.save(entry);

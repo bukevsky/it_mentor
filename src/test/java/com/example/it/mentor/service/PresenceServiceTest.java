@@ -1,12 +1,15 @@
 package com.example.it.mentor.service;
 
 import com.example.it.mentor.dto.presence.PresenceResponse;
-import com.example.it.mentor.dto.sse.PresencePayload;
+import com.example.it.mentor.dto.chat.event.PresencePayload;
+import com.example.it.mentor.dto.chat.websocket.ChatEventEnvelope;
 import com.example.it.mentor.entity.UserPresence;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.repository.ChatRepository;
 import com.example.it.mentor.repository.UserPresenceRepository;
 import com.example.it.mentor.repository.UserRepository;
+import com.example.it.mentor.websocket.ChatRealtimePublisher;
+import com.example.it.mentor.websocket.WebSocketSessionRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +42,8 @@ class PresenceServiceTest {
 
     @Mock private UserPresenceRepository presenceRepository;
     @Mock private ChatRepository chatRepository;
-    @Mock private ChatSseService sseService;
+    @Mock private ChatRealtimePublisher publisher;
+    @Mock private WebSocketSessionRegistry sessionRegistry;
     @Mock private UserRepository userRepository;
 
     private static final Long USER_ID = 7L;
@@ -58,10 +62,10 @@ class PresenceServiceTest {
 
         service.setOnline(USER_ID);
 
-        ArgumentCaptor<PresencePayload> captor = ArgumentCaptor.forClass(PresencePayload.class);
-        verify(sseService).pushPresenceChanged(eq(Set.of(PARTNER_ID)), captor.capture());
-        assertThat(captor.getValue().userId()).isEqualTo(USER_ID);
-        assertThat(captor.getValue().status()).isEqualTo("online");
+        ChatEventEnvelope event = capturePresenceEvent(Set.of(PARTNER_ID));
+        PresencePayload payload = (PresencePayload) event.payload();
+        assertThat(payload.userId()).isEqualTo(USER_ID);
+        assertThat(payload.status()).isEqualTo("online");
     }
 
     @Test
@@ -72,7 +76,7 @@ class PresenceServiceTest {
 
         service.setOnline(USER_ID);
 
-        verify(sseService).pushPresenceChanged(eq(Set.of()), any(PresencePayload.class));
+        verify(publisher).publishToUsers(eq(Set.of()), any(ChatEventEnvelope.class));
     }
 
     @Test
@@ -83,9 +87,8 @@ class PresenceServiceTest {
         service.setOffline(USER_ID);
 
         verify(presenceRepository).save(argThat(p -> p.getLastSeenAt() != null));
-        ArgumentCaptor<PresencePayload> captor = ArgumentCaptor.forClass(PresencePayload.class);
-        verify(sseService).pushPresenceChanged(eq(Set.of(PARTNER_ID)), captor.capture());
-        assertThat(captor.getValue().status()).isEqualTo("offline");
+        ChatEventEnvelope event = capturePresenceEvent(Set.of(PARTNER_ID));
+        assertThat(((PresencePayload) event.payload()).status()).isEqualTo("offline");
     }
 
     @Test
@@ -118,7 +121,7 @@ class PresenceServiceTest {
     @DisplayName("getPresence возвращает online если пользователь подключён")
     void getPresence_userIsOnline_shouldReturnOnlineStatus() {
         when(userRepository.existsById(USER_ID)).thenReturn(true);
-        when(sseService.isOnline(USER_ID)).thenReturn(true);
+        when(sessionRegistry.isOnline(USER_ID)).thenReturn(true);
         when(presenceRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
 
         PresenceResponse result = service.getPresence(USER_ID);
@@ -133,7 +136,7 @@ class PresenceServiceTest {
     void getPresence_userIsOffline_shouldReturnOfflineStatus() {
         OffsetDateTime lastSeen = OffsetDateTime.now().minusMinutes(5);
         when(userRepository.existsById(USER_ID)).thenReturn(true);
-        when(sseService.isOnline(USER_ID)).thenReturn(false);
+        when(sessionRegistry.isOnline(USER_ID)).thenReturn(false);
         when(presenceRepository.findByUserId(USER_ID)).thenReturn(Optional.of(
                 UserPresence.builder().userId(USER_ID).lastSeenAt(lastSeen).build()));
 
@@ -147,7 +150,7 @@ class PresenceServiceTest {
     @DisplayName("getPresence возвращает null lastSeenAt если нет записи в БД")
     void getPresence_noPresenceRow_shouldReturnNullLastSeenAt() {
         when(userRepository.existsById(USER_ID)).thenReturn(true);
-        when(sseService.isOnline(USER_ID)).thenReturn(false);
+        when(sessionRegistry.isOnline(USER_ID)).thenReturn(false);
         when(presenceRepository.findByUserId(USER_ID)).thenReturn(Optional.empty());
 
         PresenceResponse result = service.getPresence(USER_ID);
@@ -164,6 +167,13 @@ class PresenceServiceTest {
                 .isInstanceOf(NotFoundException.class)
                 .hasMessageContaining(USER_ID.toString());
 
-        verify(sseService, never()).isOnline(any());
+        verify(sessionRegistry, never()).isOnline(any());
+    }
+
+    private ChatEventEnvelope capturePresenceEvent(Set<Long> recipients) {
+        ArgumentCaptor<ChatEventEnvelope> captor = ArgumentCaptor.forClass(ChatEventEnvelope.class);
+        verify(publisher).publishToUsers(eq(recipients), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("presence.changed");
+        return captor.getValue();
     }
 }

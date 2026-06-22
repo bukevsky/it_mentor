@@ -69,8 +69,8 @@ app:
     bucket-name: ${MINIO_BUCKET:itmentor}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
-  sse:
-    timeout-ms: 300000
+  websocket:
+    heartbeat-ms: 10000
   security:
     rate-limit:
       auth-per-minute: 10

@@ -49,7 +49,6 @@ public class AdminService {
 
     @Transactional
     public void assignRole(Long userId, RoleCode targetRole) {
-        log.info("Назначение роли пользователю: userId={}, targetRole={}", userId, targetRole);
         validateTargetRole(targetRole);
         User user = loadUser(userId);
         Role roleToAdd = loadRole(targetRole);
@@ -59,20 +58,21 @@ public class AdminService {
                 .filter(c -> c == roleToRemove)
                 .findFirst()
                 .orElse(roleToRemove);
+        Long adminId = userService.getCurrentUserEntity().getId();
+        log.info("Назначение роли пользователю начато: adminId={}, userId={}, oldRole={}, targetRole={}, step={}",
+                adminId, userId, oldRole, targetRole, "admin_role_assignment_started");
         replaceRole(user, roleToAdd, targetRole, roleToRemove);
         user.setTokenVersion(user.getTokenVersion() + 1);
         userRepository.save(user);
-        log.info("Роль назначена: userId={}, newRole={}, removedRole={}", userId, targetRole, roleToRemove);
+        log.info("Роль назначена: adminId={}, userId={}, oldRole={}, newRole={}, removedRole={}, tokenVersion={}, step={}",
+                adminId, userId, oldRole, targetRole, roleToRemove, user.getTokenVersion(), "admin_role_assigned");
         ensureProfileExists(user, userId, targetRole);
         userDetailsService.evictUserCache(user.getEmail());
-        Long adminId = userService.getCurrentUserEntity().getId();
         eventPublisher.publishEvent(new RoleChangedAuditEvent(adminId, userId, oldRole, targetRole));
     }
 
     @Transactional
     public void changeUserStatus(Long userId, UserStatus newStatus) {
-        log.info("Смена статуса пользователя: userId={}, newStatus={}", userId, newStatus);
-
         if (newStatus == UserStatus.EMAIL_NOT_CONFIRMED) {
             throw new BusinessRuleViolationException(
                     "Статус EMAIL_NOT_CONFIRMED управляется только системой");
@@ -82,6 +82,8 @@ public class AdminService {
         UserStatus oldStatus = user.getStatus();
 
         if (oldStatus == newStatus) {
+            log.warn("Смена статуса отклонена: userId={}, status={}, reason={}, step={}",
+                    userId, newStatus, "same_status", "admin_user_status_change_rejected");
             throw new ConflictException("Статус уже установлен: " + newStatus);
         }
 
@@ -89,8 +91,14 @@ public class AdminService {
                 .map(Role::getCode)
                 .anyMatch(c -> c == RoleCode.ADMIN);
         if (isAdmin) {
+            log.warn("Смена статуса администратора отклонена: userId={}, oldStatus={}, newStatus={}, step={}",
+                    userId, oldStatus, newStatus, "admin_user_status_change_rejected");
             throw new BusinessRuleViolationException("Нельзя менять статус администратора");
         }
+
+        Long adminId = userService.getCurrentUserEntity().getId();
+        log.info("Смена статуса пользователя начата: adminId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                adminId, userId, oldStatus, newStatus, "admin_user_status_change_started");
 
         if (newStatus == UserStatus.DELETED) {
             user.setDeleted(true);
@@ -104,12 +112,12 @@ public class AdminService {
 
         user.setStatus(newStatus);
         userRepository.save(user);
-        log.info("Статус изменён: userId={}, oldStatus={}, newStatus={}, tokenVersion={}",
-                userId, oldStatus, newStatus, user.getTokenVersion());
+        log.info("Статус изменён: adminId={}, userId={}, oldStatus={}, newStatus={}, tokenVersion={}, deleted={}, step={}",
+                adminId, userId, oldStatus, newStatus, user.getTokenVersion(), user.isDeleted(),
+                "admin_user_status_changed");
 
         userDetailsService.evictUserCache(user.getEmail());
 
-        Long adminId = userService.getCurrentUserEntity().getId();
         eventPublisher.publishEvent(new UserStatusChangedAuditEvent(adminId, userId, oldStatus, newStatus));
     }
 
@@ -126,6 +134,10 @@ public class AdminService {
                 .filter(mp -> mp.getUser() != null)
                 .collect(Collectors.toMap(mp -> mp.getUser().getId(), Function.identity()));
 
+        log.debug("Пользователи для администратора загружены: qPresent={}, role={}, status={}, page={}, size={}, " +
+                        "resultCount={}, total={}, step={}",
+                qLower != null, role, status, pageable.getPageNumber(), pageable.getPageSize(),
+                page.getNumberOfElements(), page.getTotalElements(), "admin_users_loaded");
         return PagedResponse.from(page.map(user -> toAdminUserResponse(user, studentMap, mentorMap)));
     }
 
@@ -143,7 +155,10 @@ public class AdminService {
             byStatus.put(row[0].toString(), (Long) row[1]);
         }
 
-        return new AdminUsersStatsResponse(total, byRole, byStatus);
+        AdminUsersStatsResponse response = new AdminUsersStatsResponse(total, byRole, byStatus);
+        log.debug("Статистика пользователей для администратора загружена: total={}, roleBuckets={}, statusBuckets={}, step={}",
+                total, byRole.size(), byStatus.size(), "admin_users_stats_loaded");
+        return response;
     }
 
     private AdminUserResponse toAdminUserResponse(User user,
@@ -217,7 +232,8 @@ public class AdminService {
 
         mentorProfileRepository.save(MentorProfile.builder()
                 .user(user).firstName(names.firstName()).lastName(names.lastName()).build());
-        log.debug("Создан профиль ментора при смене роли: userId={}", userId);
+        log.info("Создан профиль ментора при смене роли: userId={}, step={}",
+                userId, "mentor_profile_created_for_role");
     }
 
     private void ensureStudentProfileExists(User user, Long userId) {
@@ -229,7 +245,8 @@ public class AdminService {
 
         studentProfileRepository.save(StudentProfile.builder()
                 .user(user).firstName(names.firstName()).lastName(names.lastName()).build());
-        log.debug("Создан профиль студента при смене роли: userId={}", userId);
+        log.info("Создан профиль студента при смене роли: userId={}, step={}",
+                userId, "student_profile_created_for_role");
     }
 
     private ProfileNames toProfileNames(StudentProfile profile) {

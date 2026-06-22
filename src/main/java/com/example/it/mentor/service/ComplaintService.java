@@ -46,14 +46,18 @@ public class ComplaintService {
                 .build();
 
         complaint = complaintRepository.save(complaint);
-        log.info("Жалоба создана: complaintId={}, targetType={}, targetId={}, reporterUserId={}",
-                complaint.getId(), dto.targetType(), dto.targetId(), currentUser.getId());
+        log.info("Жалоба создана: complaintId={}, targetType={}, targetId={}, reporterUserId={}, status={}, step={}",
+                complaint.getId(), dto.targetType(), dto.targetId(), currentUser.getId(), complaint.getStatus(),
+                "complaint_created");
         return mapper.toResponse(complaint);
     }
 
     public PagedResponse<ComplaintResponse> getList(ComplaintStatus status, ComplaintTargetType targetType, Pageable pageable) {
-        return PagedResponse.from(complaintRepository.findFiltered(status, targetType, pageable)
-                .map(mapper::toResponse));
+        var page = complaintRepository.findFiltered(status, targetType, pageable);
+        log.debug("Список жалоб загружен: status={}, targetType={}, page={}, size={}, resultCount={}, total={}, step={}",
+                status, targetType, pageable.getPageNumber(), pageable.getPageSize(), page.getNumberOfElements(),
+                page.getTotalElements(), "complaints_loaded");
+        return PagedResponse.from(page.map(mapper::toResponse));
     }
 
     @Transactional
@@ -76,8 +80,9 @@ public class ComplaintService {
         complaint.setResolvedAt(OffsetDateTime.now());
 
         complaint = complaintRepository.save(complaint);
-        log.info("Жалоба рассмотрена: complaintId={}, status={}, adminId={}",
-                complaint.getId(), dto.status(), admin.getId());
+        log.info("Жалоба рассмотрена: complaintId={}, oldStatus={}, newStatus={}, adminId={}, resolvedAt={}, step={}",
+                complaint.getId(), ComplaintStatus.OPEN, dto.status(), admin.getId(), complaint.getResolvedAt(),
+                "complaint_resolved");
         eventPublisher.publishEvent(new ComplaintResolvedAuditEvent(
                 admin.getId(), complaint.getId(), dto.status(), dto.resolution()));
         return mapper.toResponse(complaint);

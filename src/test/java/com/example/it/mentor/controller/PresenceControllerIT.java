@@ -42,7 +42,7 @@ class PresenceControllerIT {
     }
 
     @Test
-    @DisplayName("существующий пользователь без SSE-подключения → 200, статус offline")
+    @DisplayName("существующий пользователь без WebSocket-подключения → 200, статус offline")
     void getPresence_existingUser_shouldReturn200WithOfflineStatus() {
         ResponseEntity<PresenceResponse> response = restTemplate.exchange(
                 "/presence/" + targetUserId, HttpMethod.GET,

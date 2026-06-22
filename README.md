@@ -2,7 +2,7 @@
 
 **Платформа IT-менторинга** — веб-приложение для поиска и взаимодействия между IT-менторами и студентами.
 
-Студенты заполняют профиль, загружают резюме и находят менторов по навыкам. Менторы публикуют свои компетенции, управляют набором учеников и выстраивают менторские программы. Участники общаются в режиме реального времени через чат с SSE-событиями (с typing-индикатором и presence), договариваются о календарных сессиях, оставляют отзывы и отслеживают прогресс на персональном дашборде. Email-уведомления о ключевых событиях доставляются через outbox с retry и per-user preferences. Администраторы управляют ролями, статусами, справочниками, модерацией отзывов и жалобами; каждое такое действие фиксируется в JSONB-аудит-логе.
+Студенты заполняют профиль, загружают резюме и находят менторов по навыкам. Менторы публикуют свои компетенции, управляют набором учеников и выстраивают менторские программы. Участники общаются в режиме реального времени через STOMP/WebSocket-чат (typing, presence, delivery/read statuses), договариваются о календарных сессиях, оставляют отзывы и отслеживают прогресс на персональном дашборде. Email-уведомления о ключевых событиях доставляются через outbox с retry и per-user preferences. Администраторы управляют ролями, статусами, справочниками, модерацией отзывов и жалобами; каждое такое действие фиксируется в JSONB-аудит-логе.
 
 ---
 
@@ -242,12 +242,14 @@ Query params для `/files`: `type`, `page` (default `0`), `size` (default `50`
 | `GET`  | `/chats/by-request/{requestId}`       | JWT    | Получить чат по ID заявки                                  |
 | `GET`  | `/chats/{chatId}/messages`            | JWT    | Сообщения чата (пагинация, createdAt DESC)                 |
 | `GET`  | `/chats/{chatId}/messages/cursor`     | JWT    | Курсорная пагинация (`beforeMessageId`, `limit=20`)        |
-| `POST` | `/chats/{chatId}/messages`            | JWT    | Отправить сообщение (`body`, `attachmentFileId`)           |
-| `POST` | `/chats/{chatId}/read`                | JWT    | Отметить чат как прочитанный (204)                         |
-| `POST` | `/chats/{chatId}/typing`              | JWT    | Событие печати `{ typing: true/false }` (SSE-пуш, 204)    |
-| `GET`  | `/chats/events`                       | JWT    | SSE-поток событий реального времени                        |
+| `GET`  | `/chats/{chatId}/messages/sync`       | JWT    | Сообщения после `afterMessageId`, `id ASC`, limit ≤ 500    |
 
-SSE-события: `chat.message.created`, `chat.read`, `chat.typing`, `presence.changed`.
+Realtime-команды отправляются через STOMP endpoint `/ws`: `/app/chats/{chatId}/messages/send`,
+`messages/delivered`, `messages/read`, `typing`. Клиент подписывается на
+`/user/queue/chat-events`. JWT передаётся в `Authorization: Bearer ...` STOMP CONNECT frame.
+
+События: `chat.command.ack`, `chat.command.error`, `chat.message.created`,
+`chat.message.status.changed`, `chat.typing`, `presence.changed`.
 
 Ответ `/chats` содержит: `id`, `mentoringRequestId`, `studentUserId`, `mentorUserId`, `createdAt`, `lastMessage`, `lastMessageAt`, `lastSenderUserId`, `unreadCount`, `studentName`, `mentorName`, `mentoringRequestStatus`.
 
@@ -327,7 +329,7 @@ Sort whitelist `/admin/complaints`: `createdAt`, `status`, `resolvedAt`. Sort wh
 │  приложение)│     │      │              │                        │         │
 │             │     │  JWT Filter   FileStorage                PostgreSQL    │
 │             │     │      │                │                                │
-│             │     │  SSE Emitter        MinIO                              │
+│             │     │  STOMP Broker       MinIO                              │
 └─────────────┘     └────────────────────────────────────────────────────────┘
 ```
 
@@ -348,7 +350,8 @@ com.example.it.mentor
 │                   Dashboard, MentorStats, Presence            (21 шт.)
 ├── service/        Auth, User, Dictionary, AdminDictionary, StudentProfile,
 │                   MentorProfile, Profile, MentoringRequest, MentoringSession,
-│                   Chat, ChatSse, Typing, Review, Complaint, Admin,
+│                   Chat, ChatMessageStatus, ChatRealtime, Typing, Review,
+│                   Complaint, Admin,
 │                   Dashboard, MentorStats, Presence,
 │                   NotificationPreferences, FileStorage(Service),
 │                   EmailService / LogEmailService / SmtpEmailService
@@ -476,8 +479,8 @@ users (email, password_hash, status, token_version, is_deleted) ──< user_rol
   │       ├──── reviews (mentoring_request_id UNIQUE, reviewer_user_id, mentor_user_id, moderation_status)
   │       └──< mentoring_sessions (scheduled_at, duration_minutes, status)
   │
-  ├── chats ──< chat_messages (senderUserId, body, attachmentFileId)
-  │       └──< chat_read_states (userId, lastReadMessageId)
+  ├── chats ──< chat_messages (clientMessageId, senderUserId, body, attachmentFileId,
+  │                              deliveryStatus, deliveredAt, readAt)
   │
   ├── user_presence (userId, status, lastSeenAt)
   ├── user_notification_preferences (emailRequestEvents, emailSessionEvents, emailReviewEvents)
@@ -526,6 +529,7 @@ dict_city / dict_skill / dict_language / dict_interaction_type — все име
 | `029_otp_hash_password_reset_token.sql`     | Замена колонки `code` на `token_hash VARCHAR(60)` (BCrypt) в `password_reset_tokens` |
 | `030_add_audit_target_index.sql`            | Индекс `idx_audit_target ON admin_audit_log(target_type, target_id, created_at DESC)` |
 | `031_extend_seed_dict_data.sql`             | Расширенные seed-данные: 79 городов (РФ, СНГ, Европа, США/Канада), 120+ навыков (AI/ML, Go, Rust, DevOps, Data, Architecture и др.), 28 языков, 15 типов взаимодействия |
+| `032_chat_message_delivery_status.sql`      | Идемпотентный clientMessageId, статусы SENT/DELIVERED/READ; удаление chat_read_states |
 
 ---
 
@@ -619,9 +623,11 @@ profile.getChildren().addAll(newSet)
 
 `CacheConfig` определяет: `userDetails` (60 сек, 1000 записей), `dictionaries` (300 сек, 100 записей). После смены роли вызывается `UserDetailsServiceImpl.evictUserCache(email)`.
 
-### SSE-события реального времени
+### STOMP/WebSocket realtime
 
-При отправке сообщения и при событии `typing` сервис публикует SSE-событие другому участнику чата. Клиент подключается к `GET /chats/events` с JWT-токеном.
+Endpoint `/ws` использует STOMP и встроенный broker. Команды публикуются в `/app/chats/**`,
+персональные события доставляются через `/user/queue/chat-events`. Сообщения имеют монотонный
+статус `SENT → DELIVERED → READ`; повтор send с тем же `requestId` идемпотентен.
 
 ---
 
@@ -695,7 +701,7 @@ it.mentor/
 - [x] **Stage 7** — Логирование (MDC, structured JSON), Caffeine-кеш, JaCoCo, SonarQube
 - [x] **Stage 8** — GitHub Actions CI (Java 25 + Testcontainers, RYUK disabled)
 - [x] **Stage 9** — Отзывы на менторов: рейтинг 1–5, публичные страницы
-- [x] **Phase 1** — Дашборд, SSE-чат в реальном времени, каталог студентов, profile UX (PATCH + completion), file manager (list/download/delete/replace), статистика ментора, Admin users/stats
+- [x] **Phase 1** — Дашборд, STOMP/WebSocket-чат, каталог студентов, profile UX (PATCH + completion), file manager (list/download/delete/replace), статистика ментора, Admin users/stats
 - [x] **Phase 2** — Typing events, user presence (online/offline)
 - [x] **Stage 10** — Календарные сессии менторинга (`/sessions/**`), email-уведомления (outbox + retry + per-user preferences)
 - [x] **Phase 4** — Admin Moderation & Audit: жалобы (`/complaints`, `/admin/complaints/**`), модерация отзывов (`/admin/reviews/{id}/moderate`), аудит-лог админ-действий (`/admin/audit`), просмотр email-outbox (`/admin/notifications/outbox`)

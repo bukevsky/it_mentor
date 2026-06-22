@@ -52,12 +52,14 @@ public class NotificationDispatcher {
                 case MentoringSessionCancelledEvent e -> buildSessionCancelled(e);
                 case ReviewCreatedEvent e -> buildReviewCreated(e);
                 default -> {
-                    log.warn("Неизвестный тип события: {}", event.type());
+                    log.warn("Неизвестный тип события: eventType={}, step={}",
+                            event.type(), "notification_unknown_event");
                     yield Optional.empty();
                 }
             };
         } catch (Exception e) {
-            log.error("Ошибка формирования письма: eventType={}, error={}", event.type(), e.getMessage(), e);
+            log.error("Ошибка формирования письма: eventType={}, recipientUserId={}, error={}, step={}",
+                    event.type(), event.recipientUserId(), e.getMessage(), "notification_message_build_failed", e);
             return Optional.empty();
         }
     }
@@ -199,6 +201,8 @@ public class NotificationDispatcher {
         ctx.setVariables(model);
         String html = emailTemplateEngine.process(templateName + ".html", ctx);
         String text = emailTemplateEngine.process(templateName + ".txt", ctx);
+        log.debug("Письмо сформировано по шаблону: to={}, subject={}, template={}, step={}",
+                to, subject, templateName, "notification_message_built");
         return new EmailMessage(to, subject, html, text);
     }
 

@@ -41,12 +41,13 @@ public class AdminDictionaryService {
     @Transactional
     @CacheEvict(value = "dictionaries", key = "'cities'")
     public CityResponse createCity(CreateCityRequest dto) {
-        log.info("Создание города: name={}", dto.name());
+        log.info("Создание города: name={}, step={}", dto.name(), "dictionary_city_create_started");
         if (cityRepository.existsByNameIgnoreCaseAndActiveTrue(dto.name())) {
             throw new ConflictException("Город с именем '" + dto.name() + "' уже существует");
         }
         DictCity entity = mapper.toEntity(dto);
         entity = cityRepository.save(entity);
+        log.info("Город создан: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_city_created");
         publishDictEvent(DictionaryType.CITY, entity.getId(), DictionaryOperation.CREATE, entity.getName());
         return mapper.toCityResponse(entity);
     }
@@ -62,6 +63,7 @@ public class AdminDictionaryService {
         }
         mapper.updateFromDto(dto, entity);
         cityRepository.save(entity);
+        log.info("Город обновлён: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_city_updated");
         publishDictEvent(DictionaryType.CITY, entity.getId(), DictionaryOperation.UPDATE, entity.getName());
         return mapper.toCityResponse(entity);
     }
@@ -76,6 +78,7 @@ public class AdminDictionaryService {
         }
         entity.setActive(false);
         cityRepository.save(entity);
+        log.info("Город деактивирован: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_city_deactivated");
         publishDictEvent(DictionaryType.CITY, entity.getId(), DictionaryOperation.DELETE, entity.getName());
     }
 
@@ -92,6 +95,7 @@ public class AdminDictionaryService {
         }
         entity.setActive(true);
         cityRepository.save(entity);
+        log.info("Город восстановлен: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_city_restored");
         publishDictEvent(DictionaryType.CITY, entity.getId(), DictionaryOperation.RESTORE, entity.getName());
         return mapper.toCityResponse(entity);
     }
@@ -106,12 +110,13 @@ public class AdminDictionaryService {
     @Transactional
     @CacheEvict(value = "dictionaries", key = "'skills'")
     public SkillResponse createSkill(CreateSkillRequest dto) {
-        log.info("Создание навыка: name={}", dto.name());
+        log.info("Создание навыка: name={}, step={}", dto.name(), "dictionary_skill_create_started");
         if (skillRepository.existsByNameIgnoreCaseAndActiveTrue(dto.name())) {
             throw new ConflictException("Навык с именем '" + dto.name() + "' уже существует");
         }
         DictSkill entity = mapper.toEntity(dto);
         entity = skillRepository.save(entity);
+        log.info("Навык создан: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_skill_created");
         publishDictEvent(DictionaryType.SKILL, entity.getId(), DictionaryOperation.CREATE, entity.getName());
         return mapper.toSkillResponse(entity);
     }
@@ -127,6 +132,7 @@ public class AdminDictionaryService {
         }
         mapper.updateFromDto(dto, entity);
         skillRepository.save(entity);
+        log.info("Навык обновлён: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_skill_updated");
         publishDictEvent(DictionaryType.SKILL, entity.getId(), DictionaryOperation.UPDATE, entity.getName());
         return mapper.toSkillResponse(entity);
     }
@@ -141,6 +147,7 @@ public class AdminDictionaryService {
         }
         entity.setActive(false);
         skillRepository.save(entity);
+        log.info("Навык деактивирован: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_skill_deactivated");
         publishDictEvent(DictionaryType.SKILL, entity.getId(), DictionaryOperation.DELETE, entity.getName());
     }
 
@@ -157,6 +164,7 @@ public class AdminDictionaryService {
         }
         entity.setActive(true);
         skillRepository.save(entity);
+        log.info("Навык восстановлен: id={}, name={}, step={}", entity.getId(), entity.getName(), "dictionary_skill_restored");
         publishDictEvent(DictionaryType.SKILL, entity.getId(), DictionaryOperation.RESTORE, entity.getName());
         return mapper.toSkillResponse(entity);
     }
@@ -171,7 +179,7 @@ public class AdminDictionaryService {
     @Transactional
     @CacheEvict(value = "dictionaries", key = "'languages'")
     public LanguageResponse createLanguage(CreateLanguageRequest dto) {
-        log.info("Создание языка: name={}, code={}", dto.name(), dto.code());
+        log.info("Создание языка: name={}, code={}, step={}", dto.name(), dto.code(), "dictionary_language_create_started");
         if (languageRepository.existsByNameIgnoreCaseAndActiveTrue(dto.name())) {
             throw new ConflictException("Язык с именем '" + dto.name() + "' уже существует");
         }
@@ -180,6 +188,8 @@ public class AdminDictionaryService {
         }
         DictLanguage entity = mapper.toEntity(dto);
         entity = languageRepository.save(entity);
+        log.info("Язык создан: id={}, name={}, code={}, step={}", entity.getId(), entity.getName(), entity.getCode(),
+                "dictionary_language_created");
         publishDictEvent(DictionaryType.LANGUAGE, entity.getId(), DictionaryOperation.CREATE, entity.getName());
         return mapper.toLanguageResponse(entity);
     }
@@ -199,6 +209,8 @@ public class AdminDictionaryService {
         }
         mapper.updateFromDto(dto, entity);
         languageRepository.save(entity);
+        log.info("Язык обновлён: id={}, name={}, code={}, step={}", entity.getId(), entity.getName(), entity.getCode(),
+                "dictionary_language_updated");
         publishDictEvent(DictionaryType.LANGUAGE, entity.getId(), DictionaryOperation.UPDATE, entity.getName());
         return mapper.toLanguageResponse(entity);
     }
@@ -213,6 +225,8 @@ public class AdminDictionaryService {
         }
         entity.setActive(false);
         languageRepository.save(entity);
+        log.info("Язык деактивирован: id={}, name={}, code={}, step={}", entity.getId(), entity.getName(), entity.getCode(),
+                "dictionary_language_deactivated");
         publishDictEvent(DictionaryType.LANGUAGE, entity.getId(), DictionaryOperation.DELETE, entity.getName());
     }
 
@@ -229,6 +243,8 @@ public class AdminDictionaryService {
         }
         entity.setActive(true);
         languageRepository.save(entity);
+        log.info("Язык восстановлен: id={}, name={}, code={}, step={}", entity.getId(), entity.getName(), entity.getCode(),
+                "dictionary_language_restored");
         publishDictEvent(DictionaryType.LANGUAGE, entity.getId(), DictionaryOperation.RESTORE, entity.getName());
         return mapper.toLanguageResponse(entity);
     }
@@ -244,12 +260,15 @@ public class AdminDictionaryService {
     @Transactional
     @CacheEvict(value = "dictionaries", key = "'interactionTypes'")
     public InteractionTypeResponse createInteractionType(CreateInteractionTypeRequest dto) {
-        log.info("Создание типа взаимодействия: name={}", dto.name());
+        log.info("Создание типа взаимодействия: name={}, step={}", dto.name(),
+                "dictionary_interaction_type_create_started");
         if (interactionTypeRepository.existsByNameIgnoreCaseAndActiveTrue(dto.name())) {
             throw new ConflictException("Тип взаимодействия с именем '" + dto.name() + "' уже существует");
         }
         DictInteractionType entity = mapper.toEntity(dto);
         entity = interactionTypeRepository.save(entity);
+        log.info("Тип взаимодействия создан: id={}, name={}, step={}", entity.getId(), entity.getName(),
+                "dictionary_interaction_type_created");
         publishDictEvent(DictionaryType.INTERACTION_TYPE, entity.getId(), DictionaryOperation.CREATE, entity.getName());
         return mapper.toInteractionTypeResponse(entity);
     }
@@ -265,6 +284,8 @@ public class AdminDictionaryService {
         }
         mapper.updateFromDto(dto, entity);
         interactionTypeRepository.save(entity);
+        log.info("Тип взаимодействия обновлён: id={}, name={}, step={}", entity.getId(), entity.getName(),
+                "dictionary_interaction_type_updated");
         publishDictEvent(DictionaryType.INTERACTION_TYPE, entity.getId(), DictionaryOperation.UPDATE, entity.getName());
         return mapper.toInteractionTypeResponse(entity);
     }
@@ -279,6 +300,8 @@ public class AdminDictionaryService {
         }
         entity.setActive(false);
         interactionTypeRepository.save(entity);
+        log.info("Тип взаимодействия деактивирован: id={}, name={}, step={}", entity.getId(), entity.getName(),
+                "dictionary_interaction_type_deactivated");
         publishDictEvent(DictionaryType.INTERACTION_TYPE, entity.getId(), DictionaryOperation.DELETE, entity.getName());
     }
 
@@ -295,12 +318,16 @@ public class AdminDictionaryService {
         }
         entity.setActive(true);
         interactionTypeRepository.save(entity);
+        log.info("Тип взаимодействия восстановлен: id={}, name={}, step={}", entity.getId(), entity.getName(),
+                "dictionary_interaction_type_restored");
         publishDictEvent(DictionaryType.INTERACTION_TYPE, entity.getId(), DictionaryOperation.RESTORE, entity.getName());
         return mapper.toInteractionTypeResponse(entity);
     }
 
     private void publishDictEvent(DictionaryType type, Long entryId, DictionaryOperation op, String name) {
         Long adminId = userService.getCurrentUserEntity().getId();
+        log.debug("Audit-событие справочника опубликовано: adminId={}, dictionaryType={}, entryId={}, operation={}, step={}",
+                adminId, type, entryId, op, "dictionary_audit_event_published");
         eventPublisher.publishEvent(new DictionaryChangedAuditEvent(adminId, type, entryId, op, name));
     }
 }

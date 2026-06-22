@@ -6,6 +6,7 @@ import com.example.it.mentor.entity.User;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.StudentProfileRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ProfileService {
 
     private final UserService userService;
@@ -30,7 +32,7 @@ public class ProfileService {
         User user = userService.getCurrentUserEntity();
         RoleCode role = user.primaryRole();
 
-        return switch (role) {
+        ProfileSummaryResponse response = switch (role) {
             case STUDENT -> studentProfileRepository.findByUserId(user.getId())
                     .map(profile -> new ProfileSummaryResponse(role.name(), profile.getId(), true))
                     .orElse(new ProfileSummaryResponse(role.name(), null, false));
@@ -39,5 +41,8 @@ public class ProfileService {
                     .orElse(new ProfileSummaryResponse(role.name(), null, false));
             case ADMIN -> new ProfileSummaryResponse(role.name(), null, false);
         };
+        log.debug("Сводка профиля загружена: userId={}, role={}, profileId={}, profileExists={}, step={}",
+                user.getId(), role, response.profileId(), response.profileExists(), "profile_summary_loaded");
+        return response;
     }
 }

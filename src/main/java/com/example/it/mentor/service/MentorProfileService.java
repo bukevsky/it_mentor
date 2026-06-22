@@ -67,7 +67,10 @@ public class MentorProfileService {
         profile = persistIfNew(profile);
         replaceSkills(profile, request.skills());
         profileRepository.save(profile);
-        log.info("{} профиль ментора: userId={}, profileId={}, recruitmentStatus={}", isNew ? "Создан" : "Обновлён", user.getId(), profile.getId(), profile.getRecruitmentStatus());
+        log.info("{} профиль ментора: userId={}, profileId={}, recruitmentStatus={}, skillCount={}, step={}",
+                isNew ? "Создан" : "Обновлён", user.getId(), profile.getId(), profile.getRecruitmentStatus(),
+                request.skills() == null ? 0 : request.skills().size(),
+                isNew ? "mentor_profile_created" : "mentor_profile_updated");
 
         return loadResponse(user.getId());
     }
@@ -99,7 +102,9 @@ public class MentorProfileService {
     public PagedResponse<MentorCardResponse> searchMentors(MentorSearchFilter filter, Pageable pageable) {
         Specification<MentorProfile> spec = MentorProfileSpecification.build(filter);
         Page<MentorProfile> page = profileRepository.findAll(spec, pageable);
-        log.debug("Поиск менторов: total={}, page={}, size={}", page.getTotalElements(), pageable.getPageNumber(), pageable.getPageSize());
+        log.debug("Поиск менторов выполнен: total={}, page={}, size={}, resultCount={}, step={}",
+                page.getTotalElements(), pageable.getPageNumber(), pageable.getPageSize(),
+                page.getNumberOfElements(), "mentor_search_completed");
         if (page.isEmpty()) {
             return PagedResponse.from(page.map(mapper::toCardResponse));
         }

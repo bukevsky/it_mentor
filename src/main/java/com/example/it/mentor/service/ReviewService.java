@@ -84,8 +84,10 @@ public class ReviewService {
                 .build();
 
         review = reviewRepository.save(review);
-        log.info("Отзыв создан: reviewId={}, requestId={}, reviewerUserId={}, mentorUserId={}, rating={}",
-                review.getId(), request.getId(), currentUser.getId(), mentorUserId, dto.rating());
+        log.info("Отзыв создан: reviewId={}, requestId={}, reviewerUserId={}, mentorUserId={}, rating={}, " +
+                        "moderationStatus={}, step={}",
+                review.getId(), request.getId(), currentUser.getId(), mentorUserId, dto.rating(),
+                review.getModerationStatus(), "review_created");
         eventPublisher.publishEvent(new ReviewCreatedEvent(review.getId(), mentorUserId));
         return mapper.toResponse(review);
     }
@@ -107,6 +109,8 @@ public class ReviewService {
             throw new ForbiddenException("Доступ к отзыву запрещён");
         }
 
+        log.debug("Отзыв по заявке загружен: requestId={}, reviewId={}, userId={}, step={}",
+                requestId, review.getId(), currentUser.getId(), "review_loaded_by_request");
         return mapper.toResponse(review);
     }
 
@@ -122,6 +126,10 @@ public class ReviewService {
                 .orElseThrow(() -> new NotFoundException("Профиль ментора не найден: " + mentorProfileId));
         Long mentorUserId = mentorProfile.getUser().getId();
         Page<Review> page = reviewRepository.findByMentorUserId(mentorUserId, ReviewModerationStatus.VISIBLE, pageable);
+        log.debug("Отзывы ментора загружены: mentorProfileId={}, mentorUserId={}, page={}, size={}, " +
+                        "resultCount={}, total={}, step={}",
+                mentorProfileId, mentorUserId, pageable.getPageNumber(), pageable.getPageSize(),
+                page.getNumberOfElements(), page.getTotalElements(), "mentor_reviews_loaded");
         return PagedResponse.from(page.map(mapper::toResponse));
     }
 
@@ -131,13 +139,15 @@ public class ReviewService {
                 .orElseThrow(() -> new NotFoundException("Отзыв не найден: " + reviewId));
 
         User admin = userService.getCurrentUserEntity();
+        ReviewModerationStatus oldStatus = review.getModerationStatus();
         review.setModerationStatus(dto.moderationStatus());
         review.setModeratedBy(admin.getId());
         review.setModeratedAt(OffsetDateTime.now());
 
         review = reviewRepository.save(review);
-        log.info("Отзыв модерирован: reviewId={}, moderationStatus={}, adminId={}",
-                review.getId(), dto.moderationStatus(), admin.getId());
+        log.info("Отзыв модерирован: reviewId={}, oldStatus={}, newStatus={}, adminId={}, moderatedAt={}, step={}",
+                review.getId(), oldStatus, dto.moderationStatus(), admin.getId(), review.getModeratedAt(),
+                "review_moderated");
         eventPublisher.publishEvent(new ReviewModeratedAuditEvent(admin.getId(), review.getId(), dto.moderationStatus()));
         return mapper.toResponse(review);
     }
@@ -159,6 +169,7 @@ public class ReviewService {
         }
 
         reviewRepository.delete(review);
-        log.info("Отзыв удалён: reviewId={}, reviewerUserId={}", reviewId, currentUser.getId());
+        log.info("Отзыв удалён: reviewId={}, reviewerUserId={}, mentorUserId={}, step={}",
+                reviewId, currentUser.getId(), review.getMentorUserId(), "review_deleted");
     }
 }
