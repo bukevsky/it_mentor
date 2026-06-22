@@ -86,6 +86,7 @@ GET    /swagger-ui/**
 GET    /v3/api-docs/**
 GET    /actuator/health
 GET    /profiles/mentors/*/reviews
+GET    /ws, /ws/**             (WebSocket handshake — авторизация на STOMP CONNECT)
 ```
 
 **Все остальные эндпоинты требуют JWT в заголовке.**
@@ -1234,51 +1235,427 @@ const older = await apiCall<ChatMessageResponse[]>(
 
 ---
 
-#### STOMP/WebSocket realtime
+#### `GET /chats/{chatId}/messages/sync` — Синхронизация после reconnect
 
-Подключение: `ws(s)://<host>/ws`. JWT передаётся в STOMP CONNECT header
-`Authorization: Bearer <token>`. После CONNECT клиент подписывается один раз на
-`/user/queue/chat-events`.
+**Auth:** Требуется JWT
 
-Команды:
+Возвращает сообщения строго **новее** `afterMessageId`, отсортированные по `id ASC`. Используется после переподключения для получения сообщений, пришедших в offline.
 
-| Destination | Payload |
-|---|---|
-| `/app/chats/{chatId}/messages/send` | `{ requestId, body, attachmentFileId }` |
-| `/app/chats/{chatId}/messages/delivered` | `{ requestId, upToMessageId }` |
-| `/app/chats/{chatId}/messages/read` | `{ requestId, upToMessageId }` |
-| `/app/chats/{chatId}/typing` | `{ requestId, typing }` |
+**Query params:**
 
-Каждый `requestId` — UUID. Для send он одновременно является `clientMessageId`, поэтому повтор
-команды после reconnect не создаёт дубликат.
+| Параметр | Тип | По умолчанию | Описание |
+|---|---|---|---|
+| `afterMessageId` | number | `0` | Вернуть сообщения с `id > afterMessageId` |
+| `limit` | number | `100` | max `500` |
+
+**Response:** `200 OK` — `ChatMessageResponse[]` (сортировка по `id ASC`)
+
+---
+
+#### WebSocket/STOMP — Realtime чат
+
+**Протокол:** STOMP поверх сырого WebSocket. SockJS не используется.
+
+**Endpoint:** `ws://host/ws` (TLS: `wss://host/ws`)
+
+`/ws` открыт без предварительной авторизации — HTTP Upgrade-handshake проходит всегда, JWT проверяется на уровне STOMP CONNECT.
+
+---
+
+##### Установка соединения
+
+JWT передаётся в STOMP-заголовке `Authorization: Bearer <token>` — **не** в URL и не в HTTP-заголовках WebSocket Upgrade.
 
 ```typescript
-import { Client } from '@stomp/stompjs';
+import { Client, IFrame, IMessage } from '@stomp/stompjs';
+
+let lastKnownMessageId = 0;   // обновляйте при каждом входящем chat.message.created
+let activeChatId: number;
 
 const client = new Client({
-  brokerURL: `${BASE_URL.replace(/^http/, 'ws')}/ws`,
+  brokerURL: `${BASE_URL.replace(/^https?/, 'ws')}/ws`,
   connectHeaders: { Authorization: `Bearer ${token}` },
-  reconnectDelay: 1000,
-  heartbeatIncoming: 10000,
-  heartbeatOutgoing: 10000,
+  reconnectDelay: 3000,        // авто-переподключение через 3 с
+  heartbeatIncoming: 10_000,
+  heartbeatOutgoing: 10_000,
 });
 
-client.onConnect = () => {
-  client.subscribe('/user/queue/chat-events', frame => {
-    const event: ChatEventEnvelope = JSON.parse(frame.body);
-    handleChatEvent(event);
-  });
+client.onConnect = async (_frame: IFrame) => {
+  // Единственная подписка — заново после каждого CONNECT
+  client.subscribe('/user/queue/chat-events', handleFrame);
+
+  // Синхронизация пропущенных сообщений
+  const missed = await syncAfterReconnect(activeChatId, lastKnownMessageId);
+  missed.forEach(applyMessage);
+};
+
+client.onStompError = (frame: IFrame) => {
+  console.error('STOMP error:', frame.headers['message']);
+  // Ошибка CONNECT (невалидный / истёкший JWT) — перенаправить на логин
+  const msg = frame.headers['message'] ?? '';
+  if (msg.includes('Unauthorized') || msg.includes('BadCredentials')) {
+    redirectToLogin();
+  }
 };
 
 client.activate();
+
+// Отключение (logout / переход на другую страницу)
+await client.deactivate();
 ```
 
-Envelope содержит `type`, `requestId`, `chatId`, `occurredAt`, `payload`. Типы событий:
-`chat.command.ack`, `chat.command.error`, `chat.message.created`,
-`chat.message.status.changed`, `chat.typing`, `presence.changed`.
+---
 
-После reconnect вызовите
-`GET /chats/{chatId}/messages/sync?afterMessageId=<lastId>&limit=100` до получения пустого списка.
+##### Подписка на события
+
+После CONNECT подписывайтесь **ровно один раз** на:
+
+```
+/user/queue/chat-events
+```
+
+Все события всех чатов текущего пользователя приходят в этот канал. Разделяйте чаты по `event.chatId`.
+
+```typescript
+function handleFrame(frame: IMessage): void {
+  const event: ChatEventEnvelope = JSON.parse(frame.body);
+  switch (event.type) {
+    case 'chat.command.ack':            handleAck(event);           break;
+    case 'chat.command.error':          handleError(event);         break;
+    case 'chat.message.created':        handleMessageCreated(event);break;
+    case 'chat.message.status.changed': handleStatusChanged(event); break;
+    case 'chat.typing':                 handleTyping(event);        break;
+    case 'presence.changed':            handlePresence(event);      break;
+  }
+}
+```
+
+---
+
+##### Конверт `ChatEventEnvelope`
+
+```typescript
+interface ChatEventEnvelope {
+  type: ChatEventType;
+  requestId: string | null;  // UUID команды; null у presence.changed
+  chatId: number | null;     // null у presence.changed
+  occurredAt: string;        // OffsetDateTime ISO 8601
+  payload: unknown;          // типизированный payload — см. раздел ниже
+}
+```
+
+---
+
+##### Команды
+
+Каждая команда — `client.publish` с STOMP destination `/app/...` и JSON-телом. Обязательное поле во всех командах — `requestId: string` (UUID).
+
+###### `send` — отправить сообщение
+
+**Destination:** `/app/chats/{chatId}/messages/send`
+
+```typescript
+interface SendMessageCommand {
+  requestId: string;              // UUID — одновременно является clientMessageId
+  body: string | null;            // max 10 000 символов
+  attachmentFileId: number | null;// ID файла из POST /files/chat-attachment
+}
+```
+
+**Ответные события:**
+- `chat.command.ack` → только отправителю: `{ command: 'send', resourceId: <messageId>, duplicate: false }`
+- `chat.message.created` → **обоим** участникам: полный `ChatMessageResponse` (`deliveryStatus: 'SENT'`)
+
+```typescript
+function sendMessage(chatId: number, body: string, attachmentFileId?: number): string {
+  const requestId = crypto.randomUUID();
+  client.publish({
+    destination: `/app/chats/${chatId}/messages/send`,
+    body: JSON.stringify({ requestId, body, attachmentFileId: attachmentFileId ?? null }),
+  });
+  return requestId;  // сохраните для маппинга ack → pending
+}
+```
+
+###### `delivered` — подтвердить доставку
+
+**Destination:** `/app/chats/{chatId}/messages/delivered`
+
+```typescript
+interface MessageStatusCommand {
+  requestId: string;
+  upToMessageId: number;  // @NotNull @Positive
+}
+```
+
+**Семантика:** помечает все **чужие** (не своего авторства) сообщения с `id ≤ upToMessageId` как `DELIVERED`. Своё сообщение подтвердить нельзя — `FORBIDDEN`.
+
+**Ответные события:** `chat.message.status.changed` → **обоим** участникам.
+
+```typescript
+function confirmDelivered(chatId: number, upToMessageId: number): void {
+  client.publish({
+    destination: `/app/chats/${chatId}/messages/delivered`,
+    body: JSON.stringify({ requestId: crypto.randomUUID(), upToMessageId }),
+  });
+}
+```
+
+###### `read` — прочитать сообщения
+
+**Destination:** `/app/chats/{chatId}/messages/read`
+
+Аналогично `delivered`, но переводит статус в `READ`. Вызывайте при открытии чата / скролле до нижнего входящего сообщения. После этого `unreadCount` в `ChatResponse` обнуляется.
+
+```typescript
+function markRead(chatId: number, upToMessageId: number): void {
+  client.publish({
+    destination: `/app/chats/${chatId}/messages/read`,
+    body: JSON.stringify({ requestId: crypto.randomUUID(), upToMessageId }),
+  });
+}
+```
+
+###### `typing` — индикатор набора текста
+
+**Destination:** `/app/chats/{chatId}/typing`
+
+```typescript
+interface TypingCommand {
+  requestId: string;
+  typing: boolean;  // @NotNull: true — начал, false — остановился
+}
+```
+
+**Ответные события:** `chat.typing` → **только собеседнику**, инициатор ничего не получает.
+
+```typescript
+let typingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function onInputChange(chatId: number): void {
+  client.publish({
+    destination: `/app/chats/${chatId}/typing`,
+    body: JSON.stringify({ requestId: crypto.randomUUID(), typing: true }),
+  });
+  if (typingTimeout) clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    client.publish({
+      destination: `/app/chats/${chatId}/typing`,
+      body: JSON.stringify({ requestId: crypto.randomUUID(), typing: false }),
+    });
+  }, 3000);
+}
+```
+
+---
+
+##### Payload событий
+
+###### `chat.command.ack`
+
+Только отправителю команды.
+
+```typescript
+interface ChatCommandAckPayload {
+  command: 'send' | 'delivered' | 'read' | 'typing';
+  resourceId: number | null;   // для send — id созданного сообщения
+  duplicate: boolean;          // true → сообщение уже существует (повтор requestId)
+}
+```
+
+При `duplicate: true` второго `chat.message.created` не будет — UI уже отобразил сообщение.
+
+###### `chat.command.error`
+
+Только инициатору. **Соединение не разрывается.**
+
+```typescript
+interface ChatCommandErrorPayload {
+  code: 'NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT' | 'BUSINESS_RULE_VIOLATION' | 'VALIDATION_ERROR' | 'INTERNAL_ERROR';
+  message: string;                       // описание на русском
+  fieldErrors: Record<string, string>;   // только при VALIDATION_ERROR
+}
+```
+
+###### `chat.message.created`
+
+Обоим участникам. `payload` — полный `ChatMessageResponse`.
+
+Рекомендация: обновите `lastMessage` и `lastMessageAt` в списке чатов; если чат не открыт — инкрементируйте `unreadCount`.
+
+###### `chat.message.status.changed`
+
+Обоим участникам при `delivered` или `read`.
+
+```typescript
+interface MessageStatusChangedPayload {
+  actorUserId: number;          // кто подтвердил
+  upToMessageId: number;        // все сообщения с id ≤ этого обновлены
+  status: 'DELIVERED' | 'READ';
+  changedAt: string;            // OffsetDateTime ISO 8601
+  changedCount: number;         // сколько строк изменилось
+}
+```
+
+Обновите `deliveryStatus` у всех сообщений с `id ≤ upToMessageId` и `senderUserId !== actorUserId`.
+
+###### `chat.typing`
+
+Только собеседнику.
+
+```typescript
+interface ChatTypingPayload {
+  chatId: number;
+  userId: number;    // кто печатает
+  typing: boolean;
+}
+```
+
+Показывайте индикатор «печатает…» при `typing: true` и скрывайте по `typing: false` или таймауту 4–5 секунд.
+
+###### `presence.changed`
+
+Всем chat-партнёрам пользователя при его connect/disconnect. `requestId` и `chatId` равны `null`.
+
+```typescript
+interface PresenceChangedPayload {
+  userId: number;
+  status: 'online' | 'offline';
+  lastSeenAt: string | null;  // OffsetDateTime; заполнен при status='offline'
+}
+```
+
+---
+
+##### Модель статусов доставки
+
+```
+Отправитель → send → сервер создаёт SENT
+                            ↓
+         Получатель online → confirmDelivered → DELIVERED (оба видят)
+                                                     ↓
+                              открыл чат → markRead → READ (оба видят)
+```
+
+| Статус | Когда |
+|---|---|
+| `SENT` | Сообщение создано на сервере |
+| `DELIVERED` | Получатель подтвердил доставку командой `delivered` |
+| `READ` | Получатель прочитал, подтвердил командой `read` |
+
+**Правила:**
+- Только **получатель** вызывает `delivered` / `read`. Отправитель не может подтверждать свои сообщения → `FORBIDDEN`.
+- `upToMessageId` из другого чата → `FORBIDDEN`.
+- Статусы переходят только вперёд: `SENT → DELIVERED → READ`. Откат невозможен.
+
+---
+
+##### Идемпотентность при reconnect
+
+`requestId` в `SendMessageCommand` одновременно является `clientMessageId` — сервер хранит уникальную пару `(sender_user_id, client_message_id)`. Повторная отправка той же команды возвращает `ack { duplicate: true }` и **не** создаёт второе сообщение.
+
+```typescript
+// Алгоритм надёжной отправки
+const pending = new Map<string, { requestId: string; chatId: number; body: string; attachmentFileId: number | null }>();
+
+function sendReliable(chatId: number, body: string): string {
+  const requestId = crypto.randomUUID();
+  pending.set(requestId, { requestId, chatId, body, attachmentFileId: null });
+  client.publish({
+    destination: `/app/chats/${chatId}/messages/send`,
+    body: JSON.stringify({ requestId, body, attachmentFileId: null }),
+  });
+  return requestId;
+}
+
+function handleAck(event: ChatEventEnvelope): void {
+  const p = event.payload as ChatCommandAckPayload;
+  pending.delete(event.requestId!);   // подтверждено — убираем из очереди
+}
+
+// При reconnect — переотправляем всё неподтверждённое (сервер вернёт duplicate=true, если уже есть)
+client.onConnect = async () => {
+  client.subscribe('/user/queue/chat-events', handleFrame);
+  for (const msg of pending.values()) {
+    client.publish({
+      destination: `/app/chats/${msg.chatId}/messages/send`,
+      body: JSON.stringify({ requestId: msg.requestId, body: msg.body, attachmentFileId: msg.attachmentFileId }),
+    });
+  }
+  const missed = await syncAfterReconnect(activeChatId, lastKnownMessageId);
+  missed.forEach(applyMessage);
+};
+```
+
+---
+
+##### Reconnect и синхронизация истории
+
+```typescript
+async function syncAfterReconnect(
+  chatId: number,
+  lastKnownMessageId: number,
+): Promise<ChatMessageResponse[]> {
+  const all: ChatMessageResponse[] = [];
+  let afterId = lastKnownMessageId;
+
+  while (true) {
+    const batch = await apiCall<ChatMessageResponse[]>(
+      `${BASE_URL}/chats/${chatId}/messages/sync?afterMessageId=${afterId}&limit=100`,
+    );
+    all.push(...batch);
+    if (batch.length < 100) break;     // конец пропущенных сообщений
+    afterId = batch[batch.length - 1].id;
+  }
+
+  return all;   // отсортированы по id ASC — добавляйте в конец UI-списка
+}
+```
+
+---
+
+##### Presence
+
+Из-за особенности STOMP-протокола событие `presence.changed { status: 'online' }` приходит чуть **раньше**, чем клиент успевает подписаться на CONNECT. Поэтому начальный статус собеседника лучше запрашивать через REST:
+
+```typescript
+// При открытии чата
+const presence = await apiCall<PresenceResponse>(`${BASE_URL}/presence/${otherUserId}`);
+showPresence(presence.status, presence.lastSeenAt);
+
+// Далее — обновления через STOMP
+function handlePresence(event: ChatEventEnvelope): void {
+  const p = event.payload as PresenceChangedPayload;
+  if (p.userId === otherUserId) showPresence(p.status, p.lastSeenAt);
+}
+```
+
+---
+
+##### Обработка ошибок WebSocket
+
+Команды не бросают исключений синхронно. Ошибки приходят как `chat.command.error` через подписку.
+
+```typescript
+function handleError(event: ChatEventEnvelope): void {
+  const err = event.payload as ChatCommandErrorPayload;
+  switch (err.code) {
+    case 'VALIDATION_ERROR':
+      showFieldErrors(err.fieldErrors);  // { body: 'size must be between 0 and 10000' }
+      break;
+    case 'FORBIDDEN':
+      showToast('Нет доступа к этой операции');
+      break;
+    case 'NOT_FOUND':
+      showToast('Чат или сообщение не найдено');
+      break;
+    default:
+      showToast(err.message);
+  }
+}
+```
+
+Ошибка CONNECT (невалидный JWT) → `onStompError` callback, соединение разрывается.
 
 ---
 
@@ -2564,13 +2941,62 @@ interface AttachmentInfo {
   size: number;
 }
 
-interface ChatEventEnvelope {
-  type: 'chat.command.ack' | 'chat.command.error' | 'chat.message.created'
-    | 'chat.message.status.changed' | 'chat.typing' | 'presence.changed';
-  requestId: string | null;
-  chatId: number | null;
-  occurredAt: string;
-  payload: unknown;
+// Discriminated union — payload строго типизирован по type
+type ChatEventEnvelope =
+  | { type: 'chat.command.ack';            requestId: string;        chatId: number;       occurredAt: string; payload: ChatCommandAckPayload }
+  | { type: 'chat.command.error';          requestId: string | null; chatId: number | null; occurredAt: string; payload: ChatCommandErrorPayload }
+  | { type: 'chat.message.created';        requestId: string;        chatId: number;       occurredAt: string; payload: ChatMessageResponse }
+  | { type: 'chat.message.status.changed'; requestId: string;        chatId: number;       occurredAt: string; payload: MessageStatusChangedPayload }
+  | { type: 'chat.typing';                 requestId: string;        chatId: number;       occurredAt: string; payload: ChatTypingPayload }
+  | { type: 'presence.changed';            requestId: null;          chatId: null;         occurredAt: string; payload: PresenceChangedPayload };
+
+interface ChatCommandAckPayload {
+  command: 'send' | 'delivered' | 'read' | 'typing';
+  resourceId: number | null;   // для send — id созданного сообщения; иначе null
+  duplicate: boolean;          // true → команда send уже обрабатывалась с этим requestId
+}
+
+interface ChatCommandErrorPayload {
+  code: 'NOT_FOUND' | 'FORBIDDEN' | 'CONFLICT' | 'BUSINESS_RULE_VIOLATION' | 'VALIDATION_ERROR' | 'INTERNAL_ERROR';
+  message: string;
+  fieldErrors: Record<string, string>;  // только при VALIDATION_ERROR
+}
+
+interface MessageStatusChangedPayload {
+  actorUserId: number;          // кто вызвал delivered/read
+  upToMessageId: number;        // все сообщения с id ≤ этого изменили статус
+  status: 'DELIVERED' | 'READ';
+  changedAt: string;            // OffsetDateTime ISO 8601
+  changedCount: number;
+}
+
+interface ChatTypingPayload {
+  chatId: number;
+  userId: number;
+  typing: boolean;
+}
+
+interface PresenceChangedPayload {
+  userId: number;
+  status: 'online' | 'offline';
+  lastSeenAt: string | null;    // OffsetDateTime; заполнен при status='offline'
+}
+
+// STOMP-команды (payload при client.publish)
+interface SendMessageCommand {
+  requestId: string;              // UUID — служит также clientMessageId для идемпотентности
+  body: string | null;            // max 10 000; null если только вложение
+  attachmentFileId: number | null;
+}
+
+interface MessageStatusCommand {
+  requestId: string;
+  upToMessageId: number;          // @NotNull @Positive
+}
+
+interface TypingCommand {
+  requestId: string;
+  typing: boolean;                // @NotNull
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3257,36 +3683,54 @@ GET /profile/me
 
 ```
 1. GET /chats
-   → Список чатов с unreadCount
+   → PagedResponse<ChatResponse> с unreadCount по каждому чату
 
-2. GET /chats/5
-   → ChatResponse (текущий чат)
+2. GET /chats/5  или  GET /chats/by-request/{requestId}
+   → ChatResponse { studentUserId, mentorUserId, unreadCount, ... }
 
-3. GET /chats/5/messages/cursor?limit=20
-   → Последние 20 сообщений (для первой загрузки)
+3. GET /presence/{otherUserId}
+   → { status: "online"|"offline", lastSeenAt }
+   Запросить до STOMP CONNECT, т.к. presence.changed может прийти до подписки
 
-4. Подключиться к ws(s)://host/ws и передать JWT в STOMP CONNECT:
-   Authorization: Bearer <token>
+4. GET /chats/5/messages/cursor?limit=20
+   → ChatMessageResponse[] — последние 20 сообщений (id DESC)
+   Отобразить в обратном порядке
+
+5. STOMP CONNECT ws://host/ws
+   Header: Authorization: Bearer <token>
    SUBSCRIBE /user/queue/chat-events
 
-5. При событии chat.message.created:
-   → Добавить сообщение в список, обновить lastMessage в чате
+6. После CONNECT — синхронизация пропущенных:
+   GET /chats/5/messages/sync?afterMessageId=<lastKnownId>&limit=100
+   → новые сообщения id ASC — добавить в конец списка
 
-6. SEND /app/chats/5/messages/send
+7. Открыли чат — прочитать всё:
+   SEND /app/chats/5/messages/read
+   { requestId: "<uuid>", upToMessageId: <lastIncomingId> }
+   → chat.message.status.changed { status: "READ" } — обоим
+
+8. Пользователь пишет:
+   SEND /app/chats/5/typing { requestId, typing: true }
+   → chat.typing { userId, typing: true } — только собеседнику
+
+9. Отправить сообщение:
+   SEND /app/chats/5/messages/send
    { requestId: "<uuid>", body: "Привет!", attachmentFileId: null }
-   → chat.message.created + chat.command.ack
+   → chat.command.ack { duplicate: false } — только отправителю
+   → chat.message.created { deliveryStatus: "SENT" } — обоим
 
-7. SEND /app/chats/5/messages/delivered { requestId, upToMessageId }
-   SEND /app/chats/5/messages/read { requestId, upToMessageId }
-   → chat.message.status.changed
+10. Собеседник получил и открыл:
+    → chat.message.status.changed { status: "DELIVERED" } — обоим
+    → chat.message.status.changed { status: "READ" } — обоим
 
-8. При прокрутке вверх:
-   GET /chats/5/messages/cursor?beforeMessageId=<oldest>&limit=20
-   → Более старые сообщения
+11. При повторной отправке (reconnect) того же requestId:
+    → chat.command.ack { duplicate: true } — сообщение не дублируется
 
-9. После reconnect:
-   GET /chats/5/messages/sync?afterMessageId=<lastId>&limit=100
-   → Пропущенные сообщения по id ASC
+12. При прокрутке вверх для старой истории:
+    GET /chats/5/messages/cursor?beforeMessageId=<oldest>&limit=20
+    → Сообщения старше указанного id (id DESC)
+
+13. Разрыв соединения → reconnectDelay=3000ms → снова с шага 5
 ```
 
 ---
