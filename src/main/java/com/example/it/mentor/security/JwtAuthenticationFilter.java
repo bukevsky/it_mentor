@@ -8,8 +8,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -36,8 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String AUTH_HEADER = "Authorization";
     private static final String USER_ID_MDC_KEY = "userId";
 
-    private final JwtProvider jwtProvider;
-    private final UserDetailsServiceImpl userDetailsService;
+    private final JwtAuthenticationService jwtAuthenticationService;
 
     /**
      * Пытается аутентифицировать пользователя по JWT из заголовка {@code Authorization}.
@@ -55,33 +55,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         MDC.remove(USER_ID_MDC_KEY);
         try {
             String token = extractToken(request);
-            if (StringUtils.hasText(token) && jwtProvider.validateToken(token)) {
-                String email = jwtProvider.extractUsername(token);
-                AppUserDetails userDetails = (AppUserDetails) userDetailsService.loadUserByUsername(email);
-
-                if (!userDetails.isEnabled()) {
-                    log.warn("JWT отклонён: пользователь {} заблокирован или удалён", email);
-                } else {
-                    Long jwtTokenVersion = jwtProvider.extractTokenVersion(token);
-                    Long userTokenVersion = userDetails.getTokenVersion();
-                    boolean tokenVersionMatches = jwtTokenVersion == null
-                            ? userTokenVersion == 0L
-                            : jwtTokenVersion.equals(userTokenVersion);
-
-                    if (!tokenVersionMatches) {
-                        log.warn("JWT инвалидирован: пользователь {} обновил tokenVersion (jwt={}, db={})",
-                                email, jwtTokenVersion, userTokenVersion);
-                    } else {
-                        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                                userDetails, null, userDetails.getAuthorities()
-                        );
-                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                        SecurityContextHolder.getContext().setAuthentication(auth);
-                        MDC.put(USER_ID_MDC_KEY, String.valueOf(userDetails.getUserId()));
-                    }
-                }
+            if (StringUtils.hasText(token)) {
+                Authentication authentication = jwtAuthenticationService.authenticate(token);
+                UsernamePasswordAuthenticationToken auth =
+                        (UsernamePasswordAuthenticationToken) authentication;
+                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(auth);
+                AppUserDetails userDetails = (AppUserDetails) auth.getPrincipal();
+                MDC.put(USER_ID_MDC_KEY, String.valueOf(userDetails.getUserId()));
             }
-        } catch (JwtException | IllegalArgumentException e) {
+        } catch (AuthenticationException | JwtException | IllegalArgumentException e) {
             log.warn("Не удалось установить аутентификацию пользователя: {}", e.getMessage());
         }
 

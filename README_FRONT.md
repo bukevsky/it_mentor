@@ -121,7 +121,7 @@ Backend помещает в JWT claim `tv` — текущий `tokenVersion` п�
 Что это значит для фронтенда:
 - Не пытайтесь продлевать JWT локально — единственный источник правды по `tv` это `/auth/login`.
 - На `401` всегда чистите хранилище и переводите пользователя на `/login` (даже если визуально «только что был залогинен»).
-- Если у вас есть SSE-сессия (`/chats/events`) — она тоже обвалится с `401`, переподключайтесь только после успешного логина.
+- Если STOMP CONNECT отклонён из-за JWT, переподключайтесь только после успешного логина.
 
 ---
 
@@ -1234,122 +1234,51 @@ const older = await apiCall<ChatMessageResponse[]>(
 
 ---
 
-#### `POST /chats/{chatId}/messages` — Отправить сообщение
+#### STOMP/WebSocket realtime
 
-**Auth:** Требуется JWT
+Подключение: `ws(s)://<host>/ws`. JWT передаётся в STOMP CONNECT header
+`Authorization: Bearer <token>`. После CONNECT клиент подписывается один раз на
+`/user/queue/chat-events`.
 
-**Request:**
-```json
-{
-  "body": "Привет! Как дела с домашним заданием?",
-  "attachmentFileId": null
-}
-```
+Команды:
 
-| Поле | Тип | Описание |
-|---|---|---|
-| `body` | string \| null | Текст (хотя бы одно из `body` или `attachmentFileId`) |
-| `attachmentFileId` | number \| null | ID файла из `POST /files/chat-attachment` |
+| Destination | Payload |
+|---|---|
+| `/app/chats/{chatId}/messages/send` | `{ requestId, body, attachmentFileId }` |
+| `/app/chats/{chatId}/messages/delivered` | `{ requestId, upToMessageId }` |
+| `/app/chats/{chatId}/messages/read` | `{ requestId, upToMessageId }` |
+| `/app/chats/{chatId}/typing` | `{ requestId, typing }` |
 
-**Response:** `201 Created` — `ChatMessageResponse`
-
-**Побочный эффект:** SSE-событие `chat.message.created` отправляется второму участнику через `/chats/events`.
-
----
-
-#### `POST /chats/{chatId}/read` — Отметить как прочитанный
-
-**Auth:** Требуется JWT
-
-**Response:** `204 No Content`
-
-Сбрасывает `unreadCount` для текущего пользователя в этом чате. Отправляет SSE-событие `chat.read` второму участнику.
-
----
-
-#### `POST /chats/{chatId}/typing` — Событие печати
-
-**Auth:** Требуется JWT
-
-**Request:**
-```json
-{ "typing": true }
-```
-
-| Поле | Тип | Обязательное | Описание |
-|---|---|---|---|
-| `typing` | boolean | да (`@NotNull`) | `true` — начал печатать, `false` — остановился |
-
-**Response:** `204 No Content`
-
-Отправляет SSE-событие `chat.typing` второму участнику чата.
+Каждый `requestId` — UUID. Для send он одновременно является `clientMessageId`, поэтому повтор
+команды после reconnect не создаёт дубликат.
 
 ```typescript
-// Реализация индикатора печати
-let typingTimer: ReturnType<typeof setTimeout> | null = null;
+import { Client } from '@stomp/stompjs';
 
-function onInputChange(chatId: number) {
-  sendTyping(chatId, true);
-  if (typingTimer) clearTimeout(typingTimer);
-  typingTimer = setTimeout(() => sendTyping(chatId, false), 3000);
-}
-
-async function sendTyping(chatId: number, typing: boolean): Promise<void> {
-  await apiCall(`${BASE_URL}/chats/${chatId}/typing`, {
-    method: 'POST',
-    body: JSON.stringify({ typing }),
-  });
-}
-```
-
----
-
-#### `GET /chats/events` — SSE-поток событий реального времени
-
-**Auth:** Требуется JWT (передаётся как query param или заголовок)
-
-**Важно:** Браузерный `EventSource` не поддерживает заголовки. Используйте `fetch` с `ReadableStream` или библиотеку `@microsoft/fetch-event-source`.
-
-```typescript
-import { fetchEventSource } from '@microsoft/fetch-event-source';
-
-fetchEventSource(`${BASE_URL}/chats/events`, {
-  headers: { 'Authorization': `Bearer ${token}` },
-  onmessage(event) {
-    const data = JSON.parse(event.data);
-    switch (event.event) {
-      case 'chat.message.created':
-        // data: ChatMessageResponse
-        handleNewMessage(data);
-        break;
-      case 'chat.read':
-        // data: { chatId, userId }
-        handleChatRead(data);
-        break;
-      case 'chat.typing':
-        // data: { chatId, userId, typing: boolean }
-        handleTyping(data);
-        break;
-      case 'presence.changed':
-        // data: { userId, status: 'online'|'offline', lastSeenAt }
-        handlePresenceChange(data);
-        break;
-    }
-  },
-  onerror(err) {
-    console.error('SSE error', err);
-  },
+const client = new Client({
+  brokerURL: `${BASE_URL.replace(/^http/, 'ws')}/ws`,
+  connectHeaders: { Authorization: `Bearer ${token}` },
+  reconnectDelay: 1000,
+  heartbeatIncoming: 10000,
+  heartbeatOutgoing: 10000,
 });
+
+client.onConnect = () => {
+  client.subscribe('/user/queue/chat-events', frame => {
+    const event: ChatEventEnvelope = JSON.parse(frame.body);
+    handleChatEvent(event);
+  });
+};
+
+client.activate();
 ```
 
-**SSE-события:**
+Envelope содержит `type`, `requestId`, `chatId`, `occurredAt`, `payload`. Типы событий:
+`chat.command.ack`, `chat.command.error`, `chat.message.created`,
+`chat.message.status.changed`, `chat.typing`, `presence.changed`.
 
-| Тип события | Данные | Когда |
-|---|---|---|
-| `chat.message.created` | `ChatMessageResponse` | Новое сообщение в чате |
-| `chat.read` | `{ chatId, userId }` | Другой участник прочитал чат |
-| `chat.typing` | `{ chatId, userId, typing }` | Участник печатает / перестал печатать |
-| `presence.changed` | `{ userId, status, lastSeenAt }` | Изменился online-статус пользователя |
+После reconnect вызовите
+`GET /chats/{chatId}/messages/sync?afterMessageId=<lastId>&limit=100` до получения пустого списка.
 
 ---
 
@@ -1360,8 +1289,12 @@ fetchEventSource(`${BASE_URL}/chats/events`, {
   "id": 10,
   "chatId": 1,
   "senderUserId": 1,
+  "clientMessageId": "5e79e22b-e6da-4ac9-a0cf-faf39a0cf510",
   "body": "Привет! Как дела с домашним заданием?",
   "attachment": null,
+  "deliveryStatus": "SENT",
+  "deliveredAt": null,
+  "readAt": null,
   "createdAt": "2025-03-19T15:00:00+03:00"
 }
 ```
@@ -1673,7 +1606,7 @@ const reviews = await apiCall<PagedResponse<ReviewResponse>>(
 | `status` | string | `"online"` или `"offline"` |
 | `lastSeenAt` | string \| null | Время последней активности (OffsetDateTime) |
 
-**Использование:** Запрашивайте перед открытием чата, чтобы показать статус собеседника. Обновления приходят через SSE-событие `presence.changed`.
+**Использование:** Запрашивайте перед открытием чата, чтобы показать статус собеседника. Обновления приходят через STOMP-событие `presence.changed`.
 
 ---
 
@@ -2615,8 +2548,12 @@ interface ChatMessageResponse {
   id: number;
   chatId: number;
   senderUserId: number;
+  clientMessageId: string;
   body: string | null;
   attachment: AttachmentInfo | null;
+  deliveryStatus: 'SENT' | 'DELIVERED' | 'READ';
+  deliveredAt: string | null;
+  readAt: string | null;
   createdAt: string;
 }
 
@@ -2627,13 +2564,13 @@ interface AttachmentInfo {
   size: number;
 }
 
-interface SendMessageRequest {
-  body?: string | null;
-  attachmentFileId?: number | null;
-}
-
-interface TypingRequest {
-  typing: boolean;              // @NotNull
+interface ChatEventEnvelope {
+  type: 'chat.command.ack' | 'chat.command.error' | 'chat.message.created'
+    | 'chat.message.status.changed' | 'chat.typing' | 'presence.changed';
+  requestId: string | null;
+  chatId: number | null;
+  occurredAt: string;
+  payload: unknown;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3316,7 +3253,7 @@ GET /profile/me
 
 ---
 
-### Сценарий 6: SSE-чат в реальном времени
+### Сценарий 6: STOMP/WebSocket-чат в реальном времени
 
 ```
 1. GET /chats
@@ -3328,24 +3265,28 @@ GET /profile/me
 3. GET /chats/5/messages/cursor?limit=20
    → Последние 20 сообщений (для первой загрузки)
 
-4. Подключиться к SSE:
-   GET /chats/events
+4. Подключиться к ws(s)://host/ws и передать JWT в STOMP CONNECT:
    Authorization: Bearer <token>
+   SUBSCRIBE /user/queue/chat-events
 
 5. При событии chat.message.created:
    → Добавить сообщение в список, обновить lastMessage в чате
 
-6. POST /chats/5/messages { body: "Привет!" }
-   → ChatMessageResponse
-   (другому участнику придёт SSE chat.message.created)
+6. SEND /app/chats/5/messages/send
+   { requestId: "<uuid>", body: "Привет!", attachmentFileId: null }
+   → chat.message.created + chat.command.ack
 
-7. POST /chats/5/read
-   → 204 (сбросить unreadCount)
-   (другому участнику придёт SSE chat.read)
+7. SEND /app/chats/5/messages/delivered { requestId, upToMessageId }
+   SEND /app/chats/5/messages/read { requestId, upToMessageId }
+   → chat.message.status.changed
 
 8. При прокрутке вверх:
    GET /chats/5/messages/cursor?beforeMessageId=<oldest>&limit=20
    → Более старые сообщения
+
+9. После reconnect:
+   GET /chats/5/messages/sync?afterMessageId=<lastId>&limit=100
+   → Пропущенные сообщения по id ASC
 ```
 
 ---
@@ -3506,22 +3447,18 @@ const [cities, skills, languages] = await Promise.all([
 
 ---
 
-### Q: Как подключиться к SSE с JWT?
+### Q: Как подключиться к WebSocket с JWT?
 
-**A:** Браузерный `EventSource` не поддерживает заголовки. Варианты:
-1. Библиотека `@microsoft/fetch-event-source` (рекомендуется).
-2. Нативный `fetch` с `ReadableStream` и ручным парсингом.
-3. Передача токена через query param (менее безопасно).
+**A:** Используйте STOMP-клиент и передавайте JWT в CONNECT header. Токен не нужно помещать в URL.
 
 ```typescript
-// @microsoft/fetch-event-source
-import { fetchEventSource } from '@microsoft/fetch-event-source';
-
-fetchEventSource(`${BASE_URL}/chats/events`, {
-  headers: { 'Authorization': `Bearer ${token}` },
-  onmessage(event) { /* ... */ },
-  signal: abortController.signal, // для отключения
+const client = new Client({
+  brokerURL: `${BASE_URL.replace(/^http/, 'ws')}/ws`,
+  connectHeaders: { Authorization: `Bearer ${token}` },
+  reconnectDelay: 1000,
 });
+client.onConnect = () => client.subscribe('/user/queue/chat-events', handleFrame);
+client.activate();
 ```
 
 ---
@@ -3555,7 +3492,7 @@ function isRecipient(
 
 ### Q: Что значит `unreadCount` в ChatResponse и как его обнулить?
 
-**A:** `unreadCount` — количество сообщений, которые текущий пользователь ещё не прочитал в этом чате. Обнуляется вызовом `POST /chats/{chatId}/read`. Вызывайте его при открытии чата пользователем.
+**A:** `unreadCount` — количество входящих сообщений со статусом не `READ`. При открытии чата отправьте STOMP-команду `/app/chats/{chatId}/messages/read` с `upToMessageId` последнего видимого входящего сообщения.
 
 ---
 

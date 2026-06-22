@@ -11,13 +11,13 @@ import com.example.it.mentor.entity.MentoringRequest;
 import com.example.it.mentor.entity.StoredFile;
 import com.example.it.mentor.entity.StudentProfile;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.entity.enums.ChatMessageDeliveryStatus;
 import com.example.it.mentor.exception.BusinessRuleViolationException;
 import com.example.it.mentor.exception.ConflictException;
 import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.ChatMapper;
 import com.example.it.mentor.repository.ChatMessageRepository;
-import com.example.it.mentor.repository.ChatReadStateRepository;
 import com.example.it.mentor.repository.ChatRepository;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.StoredFileRepository;
@@ -36,6 +36,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -46,18 +47,18 @@ import static org.mockito.Mockito.*;
 @DisplayName("ChatService")
 class ChatServiceTest {
 
+    private static final UUID REQUEST_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
+
     @InjectMocks private ChatService service;
 
     @Mock private ChatRepository chatRepository;
     @Mock private ChatMessageRepository messageRepository;
-    @Mock private ChatReadStateRepository readStateRepository;
     @Mock private StudentProfileRepository studentProfileRepository;
     @Mock private MentorProfileRepository mentorProfileRepository;
     @Mock private UserService userService;
     @Mock private FileStorage fileStorage;
     @Mock private StoredFileRepository storedFileRepository;
     @Mock private ChatMapper mapper;
-    @Mock private ChatSseService sseService;
 
     private User studentUser;
     private User mentorUser;
@@ -138,7 +139,7 @@ class ChatServiceTest {
             when(chatRepository.findWithMentoringRequestById(200L)).thenReturn(Optional.of(chat));
             when(messageRepository.findFirstByChatIdAndDeletedFalseOrderByCreatedAtDesc(200L))
                     .thenReturn(Optional.empty());
-            when(readStateRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
+            when(messageRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
             when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
             when(mentorProfileRepository.findByUserId(2L)).thenReturn(Optional.empty());
 
@@ -185,7 +186,7 @@ class ChatServiceTest {
             when(chatRepository.findByMentoringRequestId(100L)).thenReturn(Optional.of(chat));
             when(messageRepository.findFirstByChatIdAndDeletedFalseOrderByCreatedAtDesc(200L))
                     .thenReturn(Optional.empty());
-            when(readStateRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
+            when(messageRepository.countUnreadForChat(200L, 1L)).thenReturn(0L);
             when(studentProfileRepository.findByUserId(1L)).thenReturn(Optional.empty());
             when(mentorProfileRepository.findByUserId(2L)).thenReturn(Optional.empty());
 
@@ -217,7 +218,7 @@ class ChatServiceTest {
             when(userService.getCurrentUserEntity()).thenReturn(studentUser);
             Page<Chat> page = new PageImpl<>(List.of(chat));
             when(chatRepository.findAllByUserId(eq(1L), any())).thenReturn(page);
-            when(readStateRepository.countUnreadPerChat(1L)).thenReturn(Map.of());
+            when(messageRepository.countUnreadPerChat(1L)).thenReturn(Map.of());
             when(studentProfileRepository.findAllByUserIdIn(any())).thenReturn(List.of());
             when(mentorProfileRepository.findAllByUserIdIn(any())).thenReturn(List.of());
             when(messageRepository.findLastMessagesByChatIds(any())).thenReturn(List.of());
@@ -243,7 +244,7 @@ class ChatServiceTest {
             ChatMessage msg = ChatMessage.builder().chat(chat).senderUserId(1L).body("Привет").build();
             Page<ChatMessage> page = new PageImpl<>(List.of(msg));
             when(messageRepository.findByChatIdAndDeletedFalseOrderByCreatedAtDesc(eq(200L), any())).thenReturn(page);
-            ChatMessageResponse resp = new ChatMessageResponse(1L, 200L, 1L, "Привет", null, null);
+            ChatMessageResponse resp = response(1L, 1L, "Привет");
             when(mapper.toMessageResponse(msg)).thenReturn(resp);
 
             PagedResponse<ChatMessageResponse> result = service.getMessages(200L, PageRequest.of(0, 20));
@@ -278,12 +279,13 @@ class ChatServiceTest {
             SendMessageRequest dto = new SendMessageRequest("Привет", null);
             ChatMessage saved = ChatMessage.builder().chat(chat).senderUserId(1L).body("Привет").build();
             when(messageRepository.save(any())).thenReturn(saved);
-            ChatMessageResponse resp = new ChatMessageResponse(1L, 200L, 1L, "Привет", null, null);
+            ChatMessageResponse resp = response(1L, 1L, "Привет");
             when(mapper.toMessageResponse(saved)).thenReturn(resp);
 
-            ChatMessageResponse result = service.sendMessage(200L, dto);
+            SendMessageResult result = service.sendMessage(200L, REQUEST_ID, dto);
 
-            assertThat(result.body()).isEqualTo("Привет");
+            assertThat(result.message().body()).isEqualTo("Привет");
+            assertThat(result.duplicate()).isFalse();
             verify(fileStorage, never()).requireOwned(any(), any());
         }
 
@@ -298,10 +300,10 @@ class ChatServiceTest {
             SendMessageRequest dto = new SendMessageRequest(null, 5L);
             ChatMessage saved = ChatMessage.builder().chat(chat).senderUserId(1L).attachment(file).build();
             when(messageRepository.save(any())).thenReturn(saved);
-            ChatMessageResponse resp = new ChatMessageResponse(1L, 200L, 1L, null, null, null);
+            ChatMessageResponse resp = response(1L, 1L, null);
             when(mapper.toMessageResponse(saved)).thenReturn(resp);
 
-            service.sendMessage(200L, dto);
+            service.sendMessage(200L, REQUEST_ID, dto);
 
             verify(fileStorage).requireOwned(5L, 1L);
         }
@@ -317,10 +319,10 @@ class ChatServiceTest {
             SendMessageRequest dto = new SendMessageRequest("Смотри файл", 5L);
             ChatMessage saved = ChatMessage.builder().chat(chat).senderUserId(1L).body("Смотри файл").attachment(file).build();
             when(messageRepository.save(any())).thenReturn(saved);
-            ChatMessageResponse resp = new ChatMessageResponse(1L, 200L, 1L, "Смотри файл", null, null);
+            ChatMessageResponse resp = response(1L, 1L, "Смотри файл");
             when(mapper.toMessageResponse(saved)).thenReturn(resp);
 
-            service.sendMessage(200L, dto);
+            service.sendMessage(200L, REQUEST_ID, dto);
 
             verify(fileStorage).requireOwned(5L, 1L);
             verify(messageRepository).save(any());
@@ -333,7 +335,7 @@ class ChatServiceTest {
             when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
             SendMessageRequest dto = new SendMessageRequest(null, null);
 
-            assertThatThrownBy(() -> service.sendMessage(200L, dto))
+            assertThatThrownBy(() -> service.sendMessage(200L, REQUEST_ID, dto))
                     .isInstanceOf(BusinessRuleViolationException.class);
         }
 
@@ -344,7 +346,7 @@ class ChatServiceTest {
             when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
             SendMessageRequest dto = new SendMessageRequest("   ", null);
 
-            assertThatThrownBy(() -> service.sendMessage(200L, dto))
+            assertThatThrownBy(() -> service.sendMessage(200L, REQUEST_ID, dto))
                     .isInstanceOf(BusinessRuleViolationException.class);
         }
 
@@ -357,7 +359,7 @@ class ChatServiceTest {
                     .when(fileStorage).requireOwned(5L, 1L);
             SendMessageRequest dto = new SendMessageRequest(null, 5L);
 
-            assertThatThrownBy(() -> service.sendMessage(200L, dto))
+            assertThatThrownBy(() -> service.sendMessage(200L, REQUEST_ID, dto))
                     .isInstanceOf(ForbiddenException.class);
         }
 
@@ -369,7 +371,7 @@ class ChatServiceTest {
             when(storedFileRepository.findById(5L)).thenReturn(Optional.empty());
             SendMessageRequest dto = new SendMessageRequest(null, 5L);
 
-            assertThatThrownBy(() -> service.sendMessage(200L, dto))
+            assertThatThrownBy(() -> service.sendMessage(200L, REQUEST_ID, dto))
                     .isInstanceOf(NotFoundException.class);
         }
 
@@ -381,12 +383,12 @@ class ChatServiceTest {
             SendMessageRequest dto = new SendMessageRequest("Хорошая работа!", null);
             ChatMessage saved = ChatMessage.builder().chat(chat).senderUserId(2L).body("Хорошая работа!").build();
             when(messageRepository.save(any())).thenReturn(saved);
-            ChatMessageResponse resp = new ChatMessageResponse(1L, 200L, 2L, "Хорошая работа!", null, null);
+            ChatMessageResponse resp = response(1L, 2L, "Хорошая работа!");
             when(mapper.toMessageResponse(saved)).thenReturn(resp);
 
-            ChatMessageResponse result = service.sendMessage(200L, dto);
+            SendMessageResult result = service.sendMessage(200L, REQUEST_ID, dto);
 
-            assertThat(result.senderUserId()).isEqualTo(2L);
+            assertThat(result.message().senderUserId()).isEqualTo(2L);
         }
 
         @Test
@@ -398,8 +400,65 @@ class ChatServiceTest {
             when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
             SendMessageRequest dto = new SendMessageRequest("Привет", null);
 
-            assertThatThrownBy(() -> service.sendMessage(200L, dto))
+            assertThatThrownBy(() -> service.sendMessage(200L, REQUEST_ID, dto))
                     .isInstanceOf(ForbiddenException.class);
         }
+
+        @Test
+        @DisplayName("duplicate requestId — возвращает существующее сообщение без повторного save")
+        void sendMessage_duplicateRequestId_shouldReturnExistingMessage() {
+            when(userService.getCurrentUserEntity()).thenReturn(studentUser);
+            when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
+            ChatMessage existing = ChatMessage.builder()
+                    .chat(chat)
+                    .senderUserId(1L)
+                    .clientMessageId(REQUEST_ID)
+                    .body("Привет")
+                    .build();
+            when(messageRepository.findBySenderUserIdAndClientMessageId(1L, REQUEST_ID))
+                    .thenReturn(Optional.of(existing));
+            ChatMessageResponse response = response(1L, 1L, "Привет");
+            when(mapper.toMessageResponse(existing)).thenReturn(response);
+
+            SendMessageResult result = service.sendMessage(
+                    200L, REQUEST_ID, new SendMessageRequest("Привет", null));
+
+            assertThat(result.message()).isSameAs(response);
+            assertThat(result.duplicate()).isTrue();
+            assertThat(result.studentUserId()).isEqualTo(1L);
+            assertThat(result.mentorUserId()).isEqualTo(2L);
+            verify(messageRepository, never()).save(any());
+        }
+    }
+
+    @Test
+    @DisplayName("sync возвращает сообщения после курсора в возрастающем порядке")
+    void getMessagesSince_participant_shouldReturnAscendingMessages() {
+        when(userService.getCurrentUserEntity()).thenReturn(studentUser);
+        when(chatRepository.findById(200L)).thenReturn(Optional.of(chat));
+        ChatMessage message = ChatMessage.builder().chat(chat).senderUserId(2L).body("Новое").build();
+        when(messageRepository.findByChatIdAndDeletedFalseAndIdGreaterThanOrderByIdAsc(
+                eq(200L), eq(40L), any())).thenReturn(List.of(message));
+        ChatMessageResponse response = response(41L, 2L, "Новое");
+        when(mapper.toMessageResponse(message)).thenReturn(response);
+
+        List<ChatMessageResponse> result = service.getMessagesSince(200L, 40L, 100);
+
+        assertThat(result).containsExactly(response);
+    }
+
+    private ChatMessageResponse response(Long id, Long senderId, String body) {
+        return new ChatMessageResponse(
+                id,
+                200L,
+                senderId,
+                REQUEST_ID,
+                body,
+                null,
+                ChatMessageDeliveryStatus.SENT,
+                null,
+                null,
+                null
+        );
     }
 }

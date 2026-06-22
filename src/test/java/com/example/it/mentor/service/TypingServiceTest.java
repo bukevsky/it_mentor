@@ -1,6 +1,5 @@
 package com.example.it.mentor.service;
 
-import com.example.it.mentor.dto.sse.TypingPayload;
 import com.example.it.mentor.entity.Chat;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.exception.ForbiddenException;
@@ -10,7 +9,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,8 +18,6 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,7 +27,6 @@ class TypingServiceTest {
     @InjectMocks private TypingService service;
 
     @Mock private ChatRepository chatRepository;
-    @Mock private ChatSseService sseService;
     @Mock private UserService userService;
 
     private static final Long CHAT_ID = 1L;
@@ -63,16 +58,12 @@ class TypingServiceTest {
         when(userService.getCurrentUserEntity()).thenReturn(student);
         when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(chat));
 
-        service.handleTyping(CHAT_ID, true);
+        TypingResult result = service.handleTyping(CHAT_ID, true);
 
-        ArgumentCaptor<Long> targetCaptor = ArgumentCaptor.forClass(Long.class);
-        ArgumentCaptor<TypingPayload> payloadCaptor = ArgumentCaptor.forClass(TypingPayload.class);
-        verify(sseService).pushTyping(targetCaptor.capture(), payloadCaptor.capture());
-
-        assertThat(targetCaptor.getValue()).isEqualTo(MENTOR_ID);
-        assertThat(payloadCaptor.getValue().userId()).isEqualTo(STUDENT_ID);
-        assertThat(payloadCaptor.getValue().chatId()).isEqualTo(CHAT_ID);
-        assertThat(payloadCaptor.getValue().typing()).isTrue();
+        assertThat(result.targetUserId()).isEqualTo(MENTOR_ID);
+        assertThat(result.payload().userId()).isEqualTo(STUDENT_ID);
+        assertThat(result.payload().chatId()).isEqualTo(CHAT_ID);
+        assertThat(result.payload().typing()).isTrue();
     }
 
     @Test
@@ -81,12 +72,9 @@ class TypingServiceTest {
         when(userService.getCurrentUserEntity()).thenReturn(mentor);
         when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(chat));
 
-        service.handleTyping(CHAT_ID, true);
+        TypingResult result = service.handleTyping(CHAT_ID, true);
 
-        ArgumentCaptor<Long> targetCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(sseService).pushTyping(targetCaptor.capture(), any());
-
-        assertThat(targetCaptor.getValue()).isEqualTo(STUDENT_ID);
+        assertThat(result.targetUserId()).isEqualTo(STUDENT_ID);
     }
 
     @Test
@@ -95,12 +83,9 @@ class TypingServiceTest {
         when(userService.getCurrentUserEntity()).thenReturn(student);
         when(chatRepository.findById(CHAT_ID)).thenReturn(Optional.of(chat));
 
-        service.handleTyping(CHAT_ID, false);
+        TypingResult result = service.handleTyping(CHAT_ID, false);
 
-        ArgumentCaptor<TypingPayload> captor = ArgumentCaptor.forClass(TypingPayload.class);
-        verify(sseService).pushTyping(any(), captor.capture());
-
-        assertThat(captor.getValue().typing()).isFalse();
+        assertThat(result.payload().typing()).isFalse();
     }
 
     @Test

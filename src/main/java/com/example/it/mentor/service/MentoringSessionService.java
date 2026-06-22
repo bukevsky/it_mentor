@@ -91,8 +91,10 @@ public class MentoringSessionService {
                 .build();
 
         session = sessionRepository.save(session);
-        log.info("Сессия создана: sessionId={}, requestId={}, userId={}, scheduledAt={}",
-                session.getId(), request.getId(), currentUser.getId(), session.getScheduledAt());
+        log.info("Сессия создана: sessionId={}, requestId={}, userId={}, studentUserId={}, mentorUserId={}, " +
+                        "status={}, scheduledAt={}, durationMinutes={}, step={}",
+                session.getId(), request.getId(), currentUser.getId(), studentUserId, mentorUserId,
+                session.getStatus(), session.getScheduledAt(), session.getDurationMinutes(), "mentoring_session_created");
         eventPublisher.publishEvent(new MentoringSessionCreatedEvent(session.getId(), studentUserId));
         eventPublisher.publishEvent(new MentoringSessionCreatedEvent(session.getId(), mentorUserId));
         return mapper.toResponse(session);
@@ -115,13 +117,17 @@ public class MentoringSessionService {
         ensureNoConflict(session.getId(), session.getStudentUser().getId(), session.getMentorUser().getId(),
                 dto.newScheduledAt(), dto.durationMinutes());
 
+        MentoringSessionStatus oldStatus = session.getStatus();
+        OffsetDateTime oldScheduledAt = session.getScheduledAt();
         session.setScheduledAt(dto.newScheduledAt());
         session.setDurationMinutes(dto.durationMinutes());
         session.setRescheduleReason(dto.reason());
         session.setStatus(MentoringSessionStatus.RESCHEDULED);
         sessionRepository.save(session);
-        log.info("Сессия перенесена: sessionId={}, userId={}, scheduledAt={}",
-                session.getId(), currentUser.getId(), session.getScheduledAt());
+        log.info("Сессия перенесена: sessionId={}, userId={}, oldStatus={}, newStatus={}, oldScheduledAt={}, " +
+                        "scheduledAt={}, durationMinutes={}, step={}",
+                session.getId(), currentUser.getId(), oldStatus, session.getStatus(), oldScheduledAt,
+                session.getScheduledAt(), session.getDurationMinutes(), "mentoring_session_rescheduled");
         Long otherUserId = currentUser.getId().equals(session.getStudentUser().getId())
                 ? session.getMentorUser().getId()
                 : session.getStudentUser().getId();
@@ -143,10 +149,12 @@ public class MentoringSessionService {
         ensureParticipant(currentUser.getId(), session.getStudentUser().getId(), session.getMentorUser().getId());
         ensureActive(session, "отменить");
 
+        MentoringSessionStatus oldStatus = session.getStatus();
         session.setStatus(MentoringSessionStatus.CANCELLED);
         session.setCancelReason(dto != null ? dto.reason() : null);
         sessionRepository.save(session);
-        log.info("Сессия отменена: sessionId={}, userId={}", session.getId(), currentUser.getId());
+        log.info("Сессия отменена: sessionId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                session.getId(), currentUser.getId(), oldStatus, session.getStatus(), "mentoring_session_cancelled");
         Long otherUserId = currentUser.getId().equals(session.getStudentUser().getId())
                 ? session.getMentorUser().getId()
                 : session.getStudentUser().getId();
@@ -171,9 +179,11 @@ public class MentoringSessionService {
             throw new BusinessRuleViolationException("Сессию нельзя завершить до её планового времени");
         }
 
+        MentoringSessionStatus oldStatus = session.getStatus();
         session.setStatus(MentoringSessionStatus.COMPLETED);
         sessionRepository.save(session);
-        log.info("Сессия завершена: sessionId={}, userId={}", session.getId(), currentUser.getId());
+        log.info("Сессия завершена: sessionId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                session.getId(), currentUser.getId(), oldStatus, session.getStatus(), "mentoring_session_completed");
         return mapper.toResponse(session);
     }
 
@@ -187,6 +197,8 @@ public class MentoringSessionService {
         User currentUser = userService.getCurrentUserEntity();
         MentoringSession session = loadWithParticipants(sessionId);
         ensureParticipant(currentUser.getId(), session.getStudentUser().getId(), session.getMentorUser().getId());
+        log.debug("Сессия загружена: sessionId={}, userId={}, status={}, step={}",
+                sessionId, currentUser.getId(), session.getStatus(), "mentoring_session_loaded");
         return mapper.toResponse(session);
     }
 
@@ -200,6 +212,9 @@ public class MentoringSessionService {
         User currentUser = userService.getCurrentUserEntity();
         Page<MentoringSession> page = sessionRepository.findByStudentUserIdOrMentorUserId(
                 currentUser.getId(), currentUser.getId(), pageable);
+        log.debug("Список сессий загружен: userId={}, page={}, size={}, resultCount={}, total={}, step={}",
+                currentUser.getId(), pageable.getPageNumber(), pageable.getPageSize(), page.getNumberOfElements(),
+                page.getTotalElements(), "mentoring_sessions_loaded");
         return PagedResponse.from(page.map(mapper::toResponse));
     }
 
@@ -213,9 +228,14 @@ public class MentoringSessionService {
         List<MentoringSession> next = sessionRepository.findNextForUser(
                 currentUser.getId(), OffsetDateTime.now(), PageRequest.of(0, 1));
         if (next.isEmpty()) {
+            log.debug("Ближайшая сессия не найдена: userId={}, step={}",
+                    currentUser.getId(), "next_mentoring_session_not_found");
             return Optional.empty();
         }
-        return Optional.of(mapper.toSummary(next.get(0), currentUser.getId()));
+        NextSessionSummary summary = mapper.toSummary(next.get(0), currentUser.getId());
+        log.debug("Ближайшая сессия найдена: userId={}, sessionId={}, step={}",
+                currentUser.getId(), summary.id(), "next_mentoring_session_found");
+        return Optional.of(summary);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

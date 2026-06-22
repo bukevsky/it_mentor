@@ -83,7 +83,8 @@ public class AuthService {
                 .build();
         studentProfileRepository.save(profile);
 
-        log.info("Зарегистрирован новый пользователь: {}", email);
+        log.info("Зарегистрирован новый пользователь: userId={}, role={}, status={}, step={}",
+                saved.getId(), RoleCode.STUDENT, saved.getStatus(), "user_registered");
         return authMapper.toRegisterResponse(saved);
     }
 
@@ -114,7 +115,8 @@ public class AuthService {
 
         String token = jwtProvider.generateToken(user.getEmail(), user.getTokenVersion());
 
-        log.info("Успешный вход пользователя: {}", email);
+        log.info("Успешный вход пользователя: userId={}, status={}, step={}",
+                user.getId(), user.getStatus(), "login_success");
         return new LoginResponse(token, "Bearer", authMapper.toUserInfoResponse(user));
     }
 
@@ -142,7 +144,8 @@ public class AuthService {
                     .build();
             passwordResetTokenRepository.save(resetToken);
             emailService.sendPasswordResetOtp(email, otp);
-            log.info("OTP-код сброса пароля сгенерирован для: {}", email);
+            log.info("OTP-код сброса пароля сгенерирован: userId={}, expiresAt={}, step={}",
+                    user.getId(), resetToken.getExpiresAt(), "password_reset_otp_generated");
         });
     }
 
@@ -184,6 +187,7 @@ public class AuthService {
         passwordResetTokenRepository.save(token);
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userService.save(user);
-        log.info("Пароль успешно сброшен для пользователя: {}", user.getEmail());
+        log.info("Пароль пользователя успешно сброшен: userId={}, step={}",
+                user.getId(), "password_reset_completed");
     }
 }

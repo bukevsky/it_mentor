@@ -1,6 +1,7 @@
 package com.example.it.mentor.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -8,6 +9,7 @@ import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -24,6 +26,26 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("async-mail-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setTaskDecorator(task -> {
+            Map<String, String> context = MDC.getCopyOfContextMap();
+            return () -> {
+                Map<String, String> previousContext = MDC.getCopyOfContextMap();
+                try {
+                    if (context == null) {
+                        MDC.clear();
+                    } else {
+                        MDC.setContextMap(context);
+                    }
+                    task.run();
+                } finally {
+                    if (previousContext == null) {
+                        MDC.clear();
+                    } else {
+                        MDC.setContextMap(previousContext);
+                    }
+                }
+            };
+        });
         executor.initialize();
         return executor;
     }
@@ -31,6 +53,7 @@ public class AsyncConfig implements AsyncConfigurer {
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
         return (ex, method, params) ->
-                log.error("Необработанное исключение в async-методе: method={}", method.getName(), ex);
+                log.error("Необработанное исключение в async-методе: method={}, step={}",
+                        method.getName(), "async_method_failed", ex);
     }
 }

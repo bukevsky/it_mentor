@@ -9,6 +9,7 @@ import com.example.it.mentor.security.UserDetailsServiceImpl;
 
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserService {
 
     private final UserRepository userRepository;
@@ -69,6 +71,8 @@ public class UserService {
     public User save(User user) {
         User saved = userRepository.save(user);
         userDetailsService.evictUserCache(saved.getEmail());
+        log.debug("Пользователь сохранён: userId={}, status={}, step={}",
+                saved.getId(), saved.getStatus(), "user_saved");
         return saved;
     }
 
@@ -85,6 +89,8 @@ public class UserService {
                 .orElseThrow(() -> new NotFoundException("Пользователь не найден"));
         user.setAvatarFileId(fileId);
         save(user);
+        log.info("Аватар привязан к пользователю: userId={}, fileId={}, step={}",
+                userId, fileId, "avatar_linked");
     }
 
     /**
@@ -95,7 +101,10 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserInfoResponse getCurrentUser() {
         String email = currentEmail();
-        return authMapper.toUserInfoResponse(findByEmail(email));
+        User user = findByEmail(email);
+        log.debug("Текущий пользователь загружен: userId={}, step={}",
+                user.getId(), "current_user_loaded");
+        return authMapper.toUserInfoResponse(user);
     }
 
     /**

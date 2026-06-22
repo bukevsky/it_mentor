@@ -37,7 +37,8 @@ public class NotificationOutboxService {
                 .nextAttemptAt(OffsetDateTime.now())
                 .build();
         outboxRepository.save(entry);
-        log.debug("Письмо поставлено в очередь: to={}, eventType={}", message.to(), eventType);
+        log.info("Письмо поставлено в очередь: id={}, to={}, eventType={}, status={}, step={}",
+                entry.getId(), message.to(), eventType, entry.getStatus(), "notification_outbox_enqueued");
     }
 
     @Scheduled(cron = "${app.notifications.outbox.scan-cron}")
@@ -45,9 +46,12 @@ public class NotificationOutboxService {
         List<NotificationOutbox> pending = outboxRepository
                 .findTop50ByStatusAndNextAttemptAtBefore(NotificationOutboxStatus.PENDING, OffsetDateTime.now());
 
-        if (pending.isEmpty()) return;
+        if (pending.isEmpty()) {
+            log.debug("Очередь уведомлений пуста: step={}", "notification_outbox_empty");
+            return;
+        }
 
-        log.debug("Обработка очереди уведомлений: {} записей", pending.size());
+        log.debug("Обработка очереди уведомлений: count={}, step={}", pending.size(), "notification_outbox_batch_started");
 
         for (NotificationOutbox entry : pending) {
             entryProcessor.process(entry.getId());
@@ -59,6 +63,9 @@ public class NotificationOutboxService {
         Page<NotificationOutbox> page = status != null
                 ? outboxRepository.findByStatus(status, pageable)
                 : outboxRepository.findAll(pageable);
+        log.debug("Outbox уведомлений загружен: status={}, page={}, size={}, resultCount={}, total={}, step={}",
+                status, pageable.getPageNumber(), pageable.getPageSize(), page.getNumberOfElements(),
+                page.getTotalElements(), "notification_outbox_loaded");
         return PagedResponse.from(page.map(this::toResponse));
     }
 

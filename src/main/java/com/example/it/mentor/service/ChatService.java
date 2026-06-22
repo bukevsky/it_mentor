@@ -6,7 +6,6 @@ import com.example.it.mentor.dto.chat.ChatResponse;
 import com.example.it.mentor.dto.chat.SendMessageRequest;
 import com.example.it.mentor.entity.Chat;
 import com.example.it.mentor.entity.ChatMessage;
-import com.example.it.mentor.entity.ChatReadState;
 import com.example.it.mentor.entity.MentoringRequest;
 import com.example.it.mentor.entity.StoredFile;
 import com.example.it.mentor.entity.User;
@@ -16,7 +15,6 @@ import com.example.it.mentor.exception.ForbiddenException;
 import com.example.it.mentor.exception.NotFoundException;
 import com.example.it.mentor.mapper.ChatMapper;
 import com.example.it.mentor.repository.ChatMessageRepository;
-import com.example.it.mentor.repository.ChatReadStateRepository;
 import com.example.it.mentor.repository.ChatRepository;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.StoredFileRepository;
@@ -30,10 +28,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -45,14 +43,12 @@ public class ChatService {
 
     private final ChatRepository chatRepository;
     private final ChatMessageRepository messageRepository;
-    private final ChatReadStateRepository readStateRepository;
     private final StudentProfileRepository studentProfileRepository;
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
     private final FileStorage fileStorage;
     private final StoredFileRepository storedFileRepository;
     private final ChatMapper mapper;
-    private final ChatSseService sseService;
 
     @Transactional
     public void createForRequest(MentoringRequest request) {
@@ -67,8 +63,8 @@ public class ChatService {
                 .mentorUserId(mentorUserId)
                 .build();
         chatRepository.save(chat);
-        log.info("Чат создан: chatId={}, requestId={}, studentUserId={}, mentorUserId={}",
-                chat.getId(), request.getId(), studentUserId, mentorUserId);
+        log.info("Чат создан: chatId={}, requestId={}, studentUserId={}, mentorUserId={}, step={}",
+                chat.getId(), request.getId(), studentUserId, mentorUserId, "chat_created");
     }
 
     public ChatResponse getById(Long chatId) {
@@ -76,6 +72,8 @@ public class ChatService {
         Chat chat = chatRepository.findWithMentoringRequestById(chatId)
                 .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
         checkParticipant(chat, currentUser.getId());
+        log.debug("Чат загружен: chatId={}, userId={}, step={}",
+                chatId, currentUser.getId(), "chat_loaded");
         return enrichSingle(chat, currentUser.getId());
     }
 
@@ -84,6 +82,8 @@ public class ChatService {
         Chat chat = chatRepository.findByMentoringRequestId(requestId)
                 .orElseThrow(() -> new NotFoundException("Чат для заявки не найден: " + requestId));
         checkParticipant(chat, currentUser.getId());
+        log.debug("Чат по заявке загружен: requestId={}, chatId={}, userId={}, step={}",
+                requestId, chat.getId(), currentUser.getId(), "chat_loaded_by_request");
         return enrichSingle(chat, currentUser.getId());
     }
 
@@ -97,7 +97,7 @@ public class ChatService {
 
         Page<Chat> page = chatRepository.findAllByUserId(userId, sortedPageable);
 
-        Map<Long, Long> unreadMap = readStateRepository.countUnreadPerChat(userId);
+        Map<Long, Long> unreadMap = messageRepository.countUnreadPerChat(userId);
 
         List<Long> studentUserIds = page.getContent().stream()
                 .map(Chat::getStudentUserId).distinct().collect(Collectors.toList());
@@ -143,6 +143,9 @@ public class ChatService {
                     requestStatus
             );
         });
+        log.debug("Список чатов загружен: userId={}, page={}, size={}, resultCount={}, total={}, step={}",
+                userId, pageable.getPageNumber(), pageable.getPageSize(), responsePage.getNumberOfElements(),
+                responsePage.getTotalElements(), "chats_loaded");
         return PagedResponse.from(responsePage);
     }
 
@@ -153,6 +156,9 @@ public class ChatService {
         checkParticipant(chat, currentUser.getId());
         Page<ChatMessage> page = messageRepository
                 .findByChatIdAndDeletedFalseOrderByCreatedAtDesc(chatId, pageable);
+        log.debug("Сообщения чата загружены: chatId={}, userId={}, page={}, size={}, resultCount={}, total={}, step={}",
+                chatId, currentUser.getId(), pageable.getPageNumber(), pageable.getPageSize(),
+                page.getNumberOfElements(), page.getTotalElements(), "chat_messages_loaded");
         return PagedResponse.from(page.map(mapper::toMessageResponse));
     }
 
@@ -162,20 +168,60 @@ public class ChatService {
                 .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
         checkParticipant(chat, currentUser.getId());
         Pageable pageable = PageRequest.of(0, limit);
-        return messageRepository
+        List<ChatMessageResponse> messages = messageRepository
                 .findByChatIdAndDeletedFalseAndIdLessThanOrderByIdDesc(chatId, beforeMessageId, pageable)
                 .getContent()
                 .stream()
                 .map(mapper::toMessageResponse)
                 .collect(Collectors.toList());
+        log.debug("Сообщения чата по курсору загружены: chatId={}, userId={}, beforeMessageId={}, limit={}, " +
+                        "resultCount={}, step={}",
+                chatId, currentUser.getId(), beforeMessageId, limit, messages.size(), "chat_messages_cursor_loaded");
+        return messages;
     }
 
-    @Transactional
-    public ChatMessageResponse sendMessage(Long chatId, SendMessageRequest dto) {
+    public List<ChatMessageResponse> getMessagesSince(Long chatId, Long afterMessageId, int limit) {
         User currentUser = userService.getCurrentUserEntity();
         Chat chat = chatRepository.findById(chatId)
                 .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
         checkParticipant(chat, currentUser.getId());
+        List<ChatMessageResponse> messages = messageRepository
+                .findByChatIdAndDeletedFalseAndIdGreaterThanOrderByIdAsc(
+                        chatId, afterMessageId, PageRequest.of(0, limit))
+                .stream()
+                .map(mapper::toMessageResponse)
+                .toList();
+        log.debug("Синхронизация сообщений выполнена: chatId={}, userId={}, afterMessageId={}, limit={}, " +
+                        "resultCount={}, step={}",
+                chatId, currentUser.getId(), afterMessageId, limit, messages.size(), "chat_messages_synced");
+        return messages;
+    }
+
+    @Transactional
+    public SendMessageResult sendMessage(Long chatId, UUID clientMessageId, SendMessageRequest dto) {
+        User currentUser = userService.getCurrentUserEntity();
+        Chat chat = chatRepository.findById(chatId)
+                .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
+        checkParticipant(chat, currentUser.getId());
+
+        ChatMessage duplicate = messageRepository
+                .findBySenderUserIdAndClientMessageId(currentUser.getId(), clientMessageId)
+                .orElse(null);
+        if (duplicate != null) {
+            if (!chatId.equals(duplicate.getChat().getId())) {
+                throw new ConflictException("requestId уже использован в другом чате");
+            }
+            log.debug("Повторная отправка сообщения обработана идемпотентно: chatId={}, messageId={}, " +
+                            "senderId={}, clientMessageId={}, step={}",
+                    chatId, duplicate.getId(), currentUser.getId(), clientMessageId,
+                    "chat_message_duplicate_returned");
+            return new SendMessageResult(
+                    mapper.toMessageResponse(duplicate),
+                    chat.getStudentUserId(),
+                    chat.getMentorUserId(),
+                    true
+            );
+        }
 
         if ((dto.body() == null || dto.body().isBlank()) && dto.attachmentFileId() == null) {
             throw new BusinessRuleViolationException("Сообщение не может быть пустым");
@@ -193,6 +239,7 @@ public class ChatService {
         ChatMessage message = ChatMessage.builder()
                 .chat(chat)
                 .senderUserId(currentUser.getId())
+                .clientMessageId(clientMessageId)
                 .body(body)
                 .attachment(attachment)
                 .build();
@@ -203,33 +250,17 @@ public class ChatService {
         chat.setLastSenderUserId(currentUser.getId());
         chatRepository.save(chat);
 
-        log.debug("Сообщение отправлено: chatId={}, senderId={}, hasAttachment={}",
-                chatId, currentUser.getId(), attachment != null);
+        log.info("Сообщение отправлено: chatId={}, messageId={}, senderId={}, hasAttachment={}, attachmentFileId={}, step={}",
+                chatId, message.getId(), currentUser.getId(), attachment != null, dto.attachmentFileId(),
+                "chat_message_sent");
 
         ChatMessageResponse response = mapper.toMessageResponse(message);
-        sseService.pushMessageCreated(chat.getStudentUserId(), chat.getMentorUserId(), response);
-        return response;
-    }
-
-    @Transactional
-    public void markAsRead(Long chatId) {
-        User currentUser = userService.getCurrentUserEntity();
-        Chat chat = chatRepository.findById(chatId)
-                .orElseThrow(() -> new NotFoundException("Чат не найден: " + chatId));
-        checkParticipant(chat, currentUser.getId());
-
-        ChatReadState state = readStateRepository
-                .findByChatIdAndUserId(chatId, currentUser.getId())
-                .orElseGet(() -> ChatReadState.builder()
-                        .chatId(chatId)
-                        .userId(currentUser.getId())
-                        .lastReadAt(OffsetDateTime.now())
-                        .build());
-        state.setLastReadAt(OffsetDateTime.now());
-        readStateRepository.save(state);
-
-        sseService.pushReadEvent(chat.getStudentUserId(), chat.getMentorUserId(), chatId);
-        log.debug("Чат отмечен как прочитанный: chatId={}, userId={}", chatId, currentUser.getId());
+        return new SendMessageResult(
+                response,
+                chat.getStudentUserId(),
+                chat.getMentorUserId(),
+                false
+        );
     }
 
     private ChatResponse enrichSingle(Chat chat, Long currentUserId) {
@@ -238,7 +269,7 @@ public class ChatService {
                 .map(mapper::toMessageResponse)
                 .orElse(null);
 
-        int unread = (int) readStateRepository.countUnreadForChat(chat.getId(), currentUserId);
+        int unread = (int) messageRepository.countUnreadForChat(chat.getId(), currentUserId);
 
         String studentName = studentProfileRepository.findByUserId(chat.getStudentUserId())
                 .map(p -> p.getFirstName() + " " + p.getLastName())

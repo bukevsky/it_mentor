@@ -6,7 +6,7 @@ import com.example.it.mentor.entity.MentoringRequest;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.User;
 import com.example.it.mentor.entity.enums.MentoringRequestStatus;
-import com.example.it.mentor.repository.ChatReadStateRepository;
+import com.example.it.mentor.repository.ChatMessageRepository;
 import com.example.it.mentor.repository.ChatRepository;
 import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.MentoringRequestRepository;
@@ -31,7 +31,7 @@ public class DashboardService {
 
     private final MentoringRequestRepository requestRepository;
     private final ChatRepository chatRepository;
-    private final ChatReadStateRepository readStateRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final StudentProfileRepository studentProfileRepository;
     private final MentorProfileRepository mentorProfileRepository;
     private final UserService userService;
@@ -73,13 +73,18 @@ public class DashboardService {
         }
 
         int totalChats = (int) chatRepository.countByUserId(user.getId());
-        Map<Long, Long> unreadMap = readStateRepository.countUnreadPerChat(user.getId());
+        Map<Long, Long> unreadMap = chatMessageRepository.countUnreadPerChat(user.getId());
         int unreadChats = (int) unreadMap.values().stream().filter(v -> v > 0).count();
 
-        return new DashboardSummaryResponse(
+        DashboardSummaryResponse response = new DashboardSummaryResponse(
                 role.name(), sentRequests, pendingRequests, acceptedRequests,
                 totalChats, unreadChats, profileCompletion,
                 mentoringSessionService.findNextForCurrentUser().orElse(null));
+        log.debug("Сводка дашборда загружена: userId={}, role={}, sentRequests={}, pendingRequests={}, " +
+                        "acceptedRequests={}, totalChats={}, unreadChats={}, profileCompletion={}, step={}",
+                user.getId(), role, sentRequests, pendingRequests, acceptedRequests, totalChats, unreadChats,
+                profileCompletion, "dashboard_summary_loaded");
+        return response;
     }
 
     public List<ActivityItemResponse> getActivity(int limit) {
@@ -102,7 +107,10 @@ public class DashboardService {
         }
 
         items.sort(Comparator.comparing(ActivityItemResponse::occurredAt).reversed());
-        return items.stream().limit(limit).toList();
+        List<ActivityItemResponse> result = items.stream().limit(limit).toList();
+        log.debug("Лента активности дашборда загружена: userId={}, role={}, limit={}, resultCount={}, step={}",
+                user.getId(), role, limit, result.size(), "dashboard_activity_loaded");
+        return result;
     }
 
     private ActivityItemResponse toRequestActivity(MentoringRequest req) {

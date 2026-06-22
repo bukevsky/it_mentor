@@ -36,12 +36,15 @@ public class NotificationPreferencesService {
         if (dto.emailReviewEvents() != null) prefs.setEmailReviewEvents(dto.emailReviewEvents());
 
         prefsRepository.save(prefs);
-        log.info("Настройки уведомлений обновлены: userId={}", user.getId());
+        log.info("Настройки уведомлений обновлены: userId={}, emailRequestEvents={}, emailSessionEvents={}, " +
+                        "emailReviewEvents={}, step={}",
+                user.getId(), prefs.isEmailRequestEvents(), prefs.isEmailSessionEvents(), prefs.isEmailReviewEvents(),
+                "notification_preferences_updated");
         return toResponse(prefs);
     }
 
     public boolean shouldNotify(Long userId, String category) {
-        return prefsRepository.findByUserId(userId)
+        boolean shouldNotify = prefsRepository.findByUserId(userId)
                 .map(prefs -> switch (category) {
                     case "request" -> prefs.isEmailRequestEvents();
                     case "session" -> prefs.isEmailSessionEvents();
@@ -49,6 +52,9 @@ public class NotificationPreferencesService {
                     default -> true;
                 })
                 .orElse(true);
+        log.debug("Проверены настройки уведомлений: userId={}, category={}, shouldNotify={}, step={}",
+                userId, category, shouldNotify, "notification_preference_checked");
+        return shouldNotify;
     }
 
     private UserNotificationPreferences getOrCreate(User user) {

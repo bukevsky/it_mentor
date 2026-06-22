@@ -36,6 +36,7 @@ public class SmtpEmailService implements EmailService {
     @Async("mailExecutor")
     @Override
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
+        long startedAt = System.nanoTime();
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
         msg.setTo(toEmail);
@@ -47,11 +48,13 @@ public class SmtpEmailService implements EmailService {
                 Если вы не запрашивали сброс пароля — проигнорируйте это письмо.
                 """.formatted(otpCode));
         mailSender.send(msg);
-        log.info("OTP-код отправлен на: {}", toEmail);
+        log.info("OTP-код отправлен: to={}, durationMs={}, step={}",
+                toEmail, durationMs(startedAt), "password_reset_otp_sent");
     }
 
     @Override
     public void send(EmailMessage message) {
+        long startedAt = System.nanoTime();
         try {
             MimeMessage mime = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
@@ -60,10 +63,16 @@ public class SmtpEmailService implements EmailService {
             helper.setSubject(message.subject());
             helper.setText(message.textBody(), message.htmlBody());
             mailSender.send(mime);
-            log.info("Письмо отправлено: to={}, subject={}", message.to(), message.subject());
+            log.info("Письмо отправлено: to={}, subject={}, durationMs={}, step={}",
+                    message.to(), message.subject(), durationMs(startedAt), "email_sent");
         } catch (Exception e) {
-            log.error("Ошибка отправки письма: to={}, subject={}", message.to(), message.subject(), e);
+            log.error("Ошибка отправки письма: to={}, subject={}, durationMs={}, step={}",
+                    message.to(), message.subject(), durationMs(startedAt), "email_send_failed", e);
             throw new RuntimeException("Ошибка отправки письма: " + e.getMessage(), e);
         }
+    }
+
+    private static long durationMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

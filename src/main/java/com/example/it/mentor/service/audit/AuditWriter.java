@@ -29,9 +29,13 @@ public class AuditWriter {
     public void write(AuditEvent event) {
         try {
             AdminAuditLog entry = toEntry(event);
-            auditLogRepository.save(entry);
+            entry = auditLogRepository.save(entry);
+            log.info("Audit-лог записан: auditLogId={}, action={}, targetType={}, targetId={}, adminId={}, step={}",
+                    entry.getId(), entry.getAction(), entry.getTargetType(), entry.getTargetId(), entry.getAdminUserId(),
+                    "audit_log_written");
         } catch (Exception e) {
-            log.error("Ошибка записи аудит-лога: event={}, error={}", event.getClass().getSimpleName(), e.getMessage(), e);
+            log.error("Ошибка записи аудит-лога: event={}, error={}, step={}",
+                    event.getClass().getSimpleName(), e.getMessage(), "audit_log_write_failed", e);
         }
     }
 
@@ -79,7 +83,8 @@ public class AuditWriter {
         try {
             return objectMapper.writeValueAsString(obj);
         } catch (JacksonException e) {
-            log.warn("Не удалось сериализовать payload: {}", e.getMessage());
+            log.warn("Не удалось сериализовать payload: error={}, step={}",
+                    e.getMessage(), "audit_payload_serialization_failed");
             return null;
         }
     }

@@ -22,11 +22,13 @@ public class LogEmailService implements EmailService {
      */
     @Override
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
-        log.info("=== [EMAIL STUB] Кому: {} | OTP: {} ===", toEmail, otpCode);
+        log.info("=== [EMAIL STUB] OTP-код сформирован для отправки: to={}, step={} ===",
+                toEmail, "password_reset_otp_stub");
     }
 
     @Override
     public void send(EmailMessage message) {
-        log.info("=== [EMAIL STUB] Кому: {} | Тема: {} ===", message.to(), message.subject());
+        log.info("=== [EMAIL STUB] Письмо сформировано для отправки: to={}, subject={}, step={} ===",
+                message.to(), message.subject(), "email_stub_send");
     }
 }

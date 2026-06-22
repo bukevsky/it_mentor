@@ -117,7 +117,10 @@ public class MentoringRequestService {
                 .build();
 
         requestRepository.save(request);
-        log.info("Заявка создана: requestId={}, direction={}, studentProfileId={}, mentorProfileId={}", request.getId(), direction, studentProfile.getId(), mentorProfile.getId());
+        log.info("Заявка создана: requestId={}, direction={}, studentProfileId={}, mentorProfileId={}, " +
+                        "initiatorUserId={}, recipientUserId={}, step={}",
+                request.getId(), direction, studentProfile.getId(), mentorProfile.getId(),
+                currentUser.getId(), recipientUserId(request), "mentoring_request_created");
 
         Long recipientUserId = direction == MentoringRequestDirection.STUDENT_TO_MENTOR
                 ? mentorProfile.getUser().getId()
@@ -156,6 +159,9 @@ public class MentoringRequestService {
             throw new ForbiddenException("Только студент или ментор может просматривать заявки");
         }
 
+        log.debug("Список заявок загружен: userId={}, role={}, status={}, page={}, size={}, resultCount={}, total={}, step={}",
+                currentUser.getId(), currentUser.primaryRole(), status, pageable.getPageNumber(), pageable.getPageSize(),
+                page.getNumberOfElements(), page.getTotalElements(), "mentoring_requests_loaded");
         return PagedResponse.from(page.map(mapper::toResponse));
     }
 
@@ -170,6 +176,8 @@ public class MentoringRequestService {
         User currentUser = userService.getCurrentUserEntity();
         MentoringRequest request = loadWithProfiles(requestId);
         checkParticipant(request, currentUser);
+        log.debug("Заявка загружена: requestId={}, userId={}, status={}, step={}",
+                requestId, currentUser.getId(), request.getStatus(), "mentoring_request_loaded");
         return mapper.toResponse(request);
     }
 
@@ -186,9 +194,11 @@ public class MentoringRequestService {
         checkRecipient(request, currentUser);
 
         if (request.getStatus() == SENT) {
+            MentoringRequestStatus oldStatus = request.getStatus();
             request.setStatus(REVIEWING);
             requestRepository.save(request);
-            log.info("Заявка взята в работу: requestId={}, userId={}", requestId, currentUser.getId());
+            log.info("Заявка взята в работу: requestId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                    requestId, currentUser.getId(), oldStatus, request.getStatus(), "mentoring_request_reviewing");
         }
         return mapper.toResponse(request);
     }
@@ -207,11 +217,13 @@ public class MentoringRequestService {
         checkRecipient(request, currentUser);
         requirePreAcceptStatus(request);
 
+        MentoringRequestStatus oldStatus = request.getStatus();
         request.setStatus(NEEDS_CLARIFICATION);
         request.setClarificationNote(dto.clarificationNote());
         markAsResponded(request);
         requestRepository.save(request);
-        log.info("Запрошено уточнение: requestId={}, userId={}", requestId, currentUser.getId());
+        log.info("Запрошено уточнение по заявке: requestId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                requestId, currentUser.getId(), oldStatus, request.getStatus(), "mentoring_request_needs_clarification");
         eventPublisher.publishEvent(new MentoringRequestNeedsClarificationEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
@@ -230,10 +242,12 @@ public class MentoringRequestService {
         requirePreAcceptStatus(request);
         ensureMentorHasCapacity(request);
 
+        MentoringRequestStatus oldStatus = request.getStatus();
         request.setStatus(ACCEPTED);
         markAsResponded(request);
         requestRepository.save(request);
-        log.info("Заявка принята: requestId={}, userId={}", requestId, currentUser.getId());
+        log.info("Заявка принята: requestId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                requestId, currentUser.getId(), oldStatus, request.getStatus(), "mentoring_request_accepted");
         eventPublisher.publishEvent(new MentoringRequestAcceptedEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
@@ -252,11 +266,13 @@ public class MentoringRequestService {
         checkRecipient(request, currentUser);
         requirePreAcceptStatus(request);
 
+        MentoringRequestStatus oldStatus = request.getStatus();
         request.setStatus(REJECTED);
         request.setReason(dto.reason());
         markAsResponded(request);
         requestRepository.save(request);
-        log.info("Заявка отклонена: requestId={}, userId={}", requestId, currentUser.getId());
+        log.info("Заявка отклонена: requestId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                requestId, currentUser.getId(), oldStatus, request.getStatus(), "mentoring_request_rejected");
         eventPublisher.publishEvent(new MentoringRequestRejectedEvent(requestId, initiatorUserId(request)));
         return mapper.toResponse(request);
     }
@@ -277,9 +293,11 @@ public class MentoringRequestService {
             throw new BusinessRuleViolationException("Нельзя отменить уже обработанную заявку");
         }
 
+        MentoringRequestStatus oldStatus = request.getStatus();
         request.setStatus(CANCELLED);
         requestRepository.save(request);
-        log.info("Заявка отменена: requestId={}, userId={}", requestId, currentUser.getId());
+        log.info("Заявка отменена: requestId={}, userId={}, oldStatus={}, newStatus={}, step={}",
+                requestId, currentUser.getId(), oldStatus, request.getStatus(), "mentoring_request_cancelled");
         eventPublisher.publishEvent(new MentoringRequestCancelledEvent(requestId, recipientUserId(request)));
         return mapper.toResponse(request);
     }
@@ -300,10 +318,13 @@ public class MentoringRequestService {
             throw new BusinessRuleViolationException("Завершить можно только принятую заявку");
         }
 
+        MentoringRequestStatus oldStatus = request.getStatus();
         request.setStatus(COMPLETED);
         request.setCompletedAt(OffsetDateTime.now());
         requestRepository.save(request);
-        log.info("Менторинг завершён: requestId={}, userId={}", requestId, currentUser.getId());
+        log.info("Менторинг завершён: requestId={}, userId={}, oldStatus={}, newStatus={}, completedAt={}, step={}",
+                requestId, currentUser.getId(), oldStatus, request.getStatus(), request.getCompletedAt(),
+                "mentoring_request_completed");
         eventPublisher.publishEvent(new MentoringRequestCompletedEvent(requestId, request.getStudentProfile().getUser().getId()));
         eventPublisher.publishEvent(new MentoringRequestCompletedEvent(requestId, request.getMentorProfile().getUser().getId()));
         return mapper.toResponse(request);

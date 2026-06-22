@@ -100,7 +100,13 @@ public class StudentProfileService {
         replaceSkills(profile, request.skills());
 
         StudentProfile saved = profileRepository.save(profile);
-        log.info("{} профиль студента: userId={}, profileId={}", isNew ? "Создан" : "Обновлён", user.getId(), saved.getId());
+        log.info("{} профиль студента: userId={}, profileId={}, educationCount={}, languageCount={}, " +
+                        "skillCount={}, step={}",
+                isNew ? "Создан" : "Обновлён", user.getId(), saved.getId(),
+                request.educations() == null ? 0 : request.educations().size(),
+                request.languages() == null ? 0 : request.languages().size(),
+                request.skills() == null ? 0 : request.skills().size(),
+                isNew ? "student_profile_created" : "student_profile_updated");
 
         return loadResponse(saved.getId());
     }
@@ -130,7 +136,8 @@ public class StudentProfileService {
                 .orElseThrow(() -> new NotFoundException("Профиль студента не найден для пользователя: " + userId));
         profile.setResumeFileId(fileId);
         profileRepository.save(profile);
-        log.info("Резюме привязано к профилю студента: userId={}, fileId={}", userId, fileId);
+        log.info("Резюме привязано к профилю студента: userId={}, profileId={}, fileId={}, step={}",
+                userId, profile.getId(), fileId, "student_resume_linked");
     }
 
     /**
@@ -150,6 +157,9 @@ public class StudentProfileService {
     public PagedResponse<StudentProfileResponse> searchStudents(StudentSearchFilter filter, Pageable pageable) {
         Specification<StudentProfile> spec = StudentProfileSpecification.build(filter);
         Page<StudentProfile> page = profileRepository.findAll(spec, pageable);
+        log.debug("Поиск студентов выполнен: page={}, size={}, resultCount={}, total={}, step={}",
+                pageable.getPageNumber(), pageable.getPageSize(), page.getNumberOfElements(),
+                page.getTotalElements(), "student_search_completed");
         return PagedResponse.from(page.map(mapper::toResponse));
     }
 
@@ -179,7 +189,8 @@ public class StudentProfileService {
         if (request.workFormats() != null) replaceValues(profile.getWorkFormats(), request.workFormats());
 
         profileRepository.save(profile);
-        log.info("Профиль студента обновлён (PATCH): userId={}", user.getId());
+        log.info("Профиль студента обновлён частично: userId={}, profileId={}, step={}",
+                user.getId(), profile.getId(), "student_profile_patched");
         return loadResponse(profile.getId());
     }
 
@@ -201,7 +212,10 @@ public class StudentProfileService {
                 + (skillsDone ? 1 : 0) + (resumeDone ? 1 : 0);
         int percent = filledCount * 25;
 
-        return new StudentCompletionResponse(percent, mainDone, aboutDone, skillsDone, resumeDone);
+        StudentCompletionResponse response = new StudentCompletionResponse(percent, mainDone, aboutDone, skillsDone, resumeDone);
+        log.debug("Заполненность профиля студента рассчитана: userId={}, profileId={}, percent={}, step={}",
+                user.getId(), profile.getId(), percent, "student_completion_calculated");
+        return response;
     }
 
     @Transactional
@@ -234,7 +248,8 @@ public class StudentProfileService {
         profile.getSkills().addAll(newSkills);
         profileRepository.save(profile);
 
-        log.info("Навыки студента заменены: userId={}", user.getId());
+        log.info("Навыки студента заменены: userId={}, profileId={}, skillCount={}, step={}",
+                user.getId(), profile.getId(), newSkills.size(), "student_skills_replaced");
         return loadResponse(profile.getId());
     }
 
@@ -268,7 +283,8 @@ public class StudentProfileService {
         profile.getLanguages().addAll(newLanguages);
         profileRepository.save(profile);
 
-        log.info("Языки студента заменены: userId={}", user.getId());
+        log.info("Языки студента заменены: userId={}, profileId={}, languageCount={}, step={}",
+                user.getId(), profile.getId(), newLanguages.size(), "student_languages_replaced");
         return loadResponse(profile.getId());
     }
 

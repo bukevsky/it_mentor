@@ -8,6 +8,7 @@ import com.example.it.mentor.repository.MentorProfileRepository;
 import com.example.it.mentor.repository.MentoringRequestRepository;
 import com.example.it.mentor.repository.ReviewRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +17,7 @@ import java.util.List;
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
+@Slf4j
 public class MentorStatsService {
 
     private final ReviewRepository reviewRepository;
@@ -59,7 +61,7 @@ public class MentorStatsService {
             progress = completedRequests * 100 / 5;
         }
 
-        return new MentorStatsResponse(
+        MentorStatsResponse response = new MentorStatsResponse(
                 Math.round(averageRating * 10.0) / 10.0,
                 reviewCount,
                 completedRequests,
@@ -67,5 +69,10 @@ public class MentorStatsService {
                 level,
                 progress
         );
+        log.debug("Статистика ментора загружена: userId={}, mentorProfileId={}, reviewCount={}, " +
+                        "completedRequests={}, responseRate={}, level={}, step={}",
+                userId, mentorProfileId, reviewCount, completedRequests, response.responseRate(),
+                level, "mentor_stats_loaded");
+        return response;
     }
 }
