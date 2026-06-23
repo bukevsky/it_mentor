@@ -1,5 +1,7 @@
 package com.example.it.mentor.security;
 
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -8,17 +10,23 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("JwtProvider")
 class JwtProviderTest {
 
+    private static final String SECRET = "test-secret-key-must-be-at-least-32-chars!";
     private JwtProvider jwtProvider;
 
     @BeforeEach
     void setUp() {
         jwtProvider = new JwtProvider();
-        ReflectionTestUtils.setField(jwtProvider, "secret", "test-secret-key-must-be-at-least-32-chars!");
+        ReflectionTestUtils.setField(jwtProvider, "secret", SECRET);
         ReflectionTestUtils.setField(jwtProvider, "expirationMs", 3_600_000L);
         ReflectionTestUtils.invokeMethod(jwtProvider, "initKey");
     }
@@ -32,14 +40,14 @@ class JwtProviderTest {
         @Test
         @DisplayName("возвращает непустой JWT")
         void shouldReturnNonBlankToken() {
-            String token = jwtProvider.generateToken("user@example.com");
+            String token = jwtProvider.generateToken("user@example.com", 1L);
             assertThat(token).isNotBlank();
         }
 
         @Test
         @DisplayName("JWT имеет структуру из 3 частей, разделённых точкой (header.payload.signature)")
         void shouldHaveThreePartStructure() {
-            String token = jwtProvider.generateToken("user@example.com");
+            String token = jwtProvider.generateToken("user@example.com", 0L);
             String[] parts = token.split("\\.");
             assertThat(parts)
                     .as("JWT должен состоять ровно из трёх частей: header.payload.signature")
@@ -53,21 +61,27 @@ class JwtProviderTest {
         @ValueSource(strings = {"user@example.com", "admin@company.ru", "test.user+alias@domain.org"})
         @DisplayName("токены для разных email-адресов уникальны")
         void differentEmails_shouldProduceDifferentTokens(String email) {
-            String token = jwtProvider.generateToken(email);
+            String token = jwtProvider.generateToken(email, 0L);
             assertThat(token).isNotBlank();
-            // Каждый токен должен содержать именно тот email, с которым был создан
             assertThat(jwtProvider.extractUsername(token)).isEqualTo(email);
         }
 
         @Test
         @DisplayName("два вызова для одного email возвращают токены с одним и тем же subject")
         void sameEmail_twoTokens_shouldHaveSameSubject() {
-            String token1 = jwtProvider.generateToken("user@example.com");
-            String token2 = jwtProvider.generateToken("user@example.com");
+            String token1 = jwtProvider.generateToken("user@example.com", 0L);
+            String token2 = jwtProvider.generateToken("user@example.com", 0L);
 
-            // Оба должны быть валидны и содержать одинаковый email
             assertThat(jwtProvider.extractUsername(token1)).isEqualTo("user@example.com");
             assertThat(jwtProvider.extractUsername(token2)).isEqualTo("user@example.com");
+        }
+
+        @Test
+        @DisplayName("generateToken_includesTokenVersionClaim")
+        void generateToken_includesTokenVersionClaim() {
+            String token = jwtProvider.generateToken("user@example.com", 5L);
+            Long tv = jwtProvider.extractTokenVersion(token);
+            assertThat(tv).isEqualTo(5L);
         }
     }
 
@@ -80,7 +94,7 @@ class JwtProviderTest {
         @Test
         @DisplayName("достаёт email из валидного JWT (round-trip)")
         void validToken_shouldReturnCorrectEmail() {
-            String token = jwtProvider.generateToken("user@example.com");
+            String token = jwtProvider.generateToken("user@example.com", 0L);
             assertThat(jwtProvider.extractUsername(token)).isEqualTo("user@example.com");
         }
 
@@ -92,10 +106,40 @@ class JwtProviderTest {
         })
         @DisplayName("корректно извлекает различные форматы email")
         void differentEmailFormats_shouldExtractCorrectly(String email) {
-            String token = jwtProvider.generateToken(email);
+            String token = jwtProvider.generateToken(email, 0L);
             assertThat(jwtProvider.extractUsername(token))
                     .as("Извлечённый email должен совпадать с оригинальным")
                     .isEqualTo(email);
+        }
+    }
+
+    // ── extractTokenVersion ───────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("extractTokenVersion")
+    class ExtractTokenVersion {
+
+        @Test
+        @DisplayName("extractTokenVersion_returnsClaimValue")
+        void extractTokenVersion_returnsClaimValue() {
+            String token = jwtProvider.generateToken("user@example.com", 42L);
+            assertThat(jwtProvider.extractTokenVersion(token)).isEqualTo(42L);
+        }
+
+        @Test
+        @DisplayName("extractTokenVersion_legacyTokenWithoutClaim_returnsNull")
+        void extractTokenVersion_legacyTokenWithoutClaim_returnsNull() {
+            // Создаём токен вручную без 'tv' claim (legacy)
+            SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+            Date now = new Date();
+            String legacyToken = Jwts.builder()
+                    .subject("user@example.com")
+                    .issuedAt(now)
+                    .expiration(new Date(now.getTime() + 3_600_000L))
+                    .signWith(key)
+                    .compact();
+
+            assertThat(jwtProvider.extractTokenVersion(legacyToken)).isNull();
         }
     }
 
@@ -108,7 +152,7 @@ class JwtProviderTest {
         @Test
         @DisplayName("валидный токен → true")
         void validToken_shouldReturnTrue() {
-            String token = jwtProvider.generateToken("user@example.com");
+            String token = jwtProvider.generateToken("user@example.com", 0L);
             assertThat(jwtProvider.validateToken(token)).isTrue();
         }
 
@@ -134,11 +178,11 @@ class JwtProviderTest {
         @DisplayName("истёкший токен → false")
         void expiredToken_shouldReturnFalse() {
             JwtProvider shortLived = new JwtProvider();
-            ReflectionTestUtils.setField(shortLived, "secret", "test-secret-key-must-be-at-least-32-chars!");
-            ReflectionTestUtils.setField(shortLived, "expirationMs", -1000L); // уже истёк в момент создания
+            ReflectionTestUtils.setField(shortLived, "secret", SECRET);
+            ReflectionTestUtils.setField(shortLived, "expirationMs", -1000L);
             ReflectionTestUtils.invokeMethod(shortLived, "initKey");
 
-            String token = shortLived.generateToken("user@example.com");
+            String token = shortLived.generateToken("user@example.com", 0L);
             assertThat(shortLived.validateToken(token)).isFalse();
         }
 
@@ -150,9 +194,8 @@ class JwtProviderTest {
             ReflectionTestUtils.setField(otherProvider, "expirationMs", 3_600_000L);
             ReflectionTestUtils.invokeMethod(otherProvider, "initKey");
 
-            String tokenFromOther = otherProvider.generateToken("user@example.com");
+            String tokenFromOther = otherProvider.generateToken("user@example.com", 0L);
 
-            // Наш jwtProvider не должен принимать токен, подписанный другим ключом
             assertThat(jwtProvider.validateToken(tokenFromOther))
                     .as("Токен от другого ключа не должен быть валидным")
                     .isFalse();
@@ -161,8 +204,7 @@ class JwtProviderTest {
         @Test
         @DisplayName("изменённый payload (подделка) → false")
         void modifiedPayload_shouldReturnFalse() {
-            String token = jwtProvider.generateToken("user@example.com");
-            // Разбиваем токен и подменяем payload на заведомо неверный base64
+            String token = jwtProvider.generateToken("user@example.com", 0L);
             String[] parts = token.split("\\.");
             String fakeToken = parts[0] + ".AAAAAAAAAAAA.." + parts[2];
 

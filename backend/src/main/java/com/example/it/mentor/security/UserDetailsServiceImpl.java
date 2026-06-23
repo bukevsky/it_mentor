@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -41,23 +40,31 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     @Cacheable(value = "userDetails", key = "#email")
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
         com.example.it.mentor.entity.User user = userRepository
-                .findByEmailAndDeletedFalse(email)
+                .findWithRolesByEmailAndDeletedFalse(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Пользователь не найден: " + email));
 
         List<SimpleGrantedAuthority> authorities = user.getRoles().stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getCode().name()))
                 .toList();
 
-        boolean enabled = user.getStatus() != UserStatus.BLOCKED;
+        boolean enabled = user.getStatus() != UserStatus.BLOCKED
+                && user.getStatus() != UserStatus.DELETED;
 
-        return User.builder()
-                .username(user.getEmail())
-                .password(user.getPasswordHash())
-                .disabled(!enabled)
-                .authorities(authorities)
-                .build();
+        return new AppUserDetails(
+                user.getId(),
+                user.getEmail(),
+                user.getPasswordHash(),
+                enabled,
+                user.getTokenVersion(),
+                authorities
+        );
     }
 
+    /**
+     * Удаляет пользователя из кэша security-деталей.
+     *
+     * @param email email пользователя
+     */
     @CacheEvict(value = "userDetails", key = "#email")
     public void evictUserCache(String email) {
         // Вызывается при изменении пользователя (смена пароля, блокировка, смена ролей)

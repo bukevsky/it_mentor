@@ -1,12 +1,16 @@
 package com.example.it.mentor.controller;
 
 import com.example.it.mentor.dto.AdminRoleRequest;
+import com.example.it.mentor.dto.AdminUserStatusRequest;
 import com.example.it.mentor.dto.LoginRequest;
 import com.example.it.mentor.dto.LoginResponse;
 import com.example.it.mentor.dto.RegisterRequest;
 import com.example.it.mentor.entity.Role;
 import com.example.it.mentor.entity.RoleCode;
 import com.example.it.mentor.entity.User;
+import com.example.it.mentor.entity.UserStatus;
+import com.example.it.mentor.entity.enums.AuditAction;
+import com.example.it.mentor.repository.AdminAuditLogRepository;
 import com.example.it.mentor.repository.RoleRepository;
 import com.example.it.mentor.repository.UserRepository;
 import com.example.it.mentor.security.UserDetailsServiceImpl;
@@ -34,10 +38,12 @@ class AdminControllerIT {
     @Autowired private UserRepository userRepository;
     @Autowired private RoleRepository roleRepository;
     @Autowired private UserDetailsServiceImpl userDetailsService;
+    @Autowired private AdminAuditLogRepository auditLogRepository;
 
     private String adminToken;
     private String studentToken;
     private Long targetUserId;
+    private Long adminUserId;
 
     @BeforeEach
     void setUp() {
@@ -47,6 +53,7 @@ class AdminControllerIT {
         registerAndLogin(adminEmail);
         grantAdminRole(adminEmail);
         adminToken = login(adminEmail);
+        adminUserId = userRepository.findByEmailAndDeletedFalse(adminEmail).orElseThrow().getId();
 
         studentToken = registerAndLogin(targetEmail);
         targetUserId = userRepository.findByEmailAndDeletedFalse(targetEmail).orElseThrow().getId();
@@ -61,7 +68,7 @@ class AdminControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        User updated = userRepository.findById(targetUserId).orElseThrow();
+        User updated = userRepository.findWithRolesById(targetUserId).orElseThrow();
         assertThat(updated.getRoles()).anyMatch(r -> r.getCode() == RoleCode.MENTOR);
         assertThat(updated.getRoles()).noneMatch(r -> r.getCode() == RoleCode.STUDENT);
     }
@@ -81,7 +88,7 @@ class AdminControllerIT {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 
-        User updated = userRepository.findById(targetUserId).orElseThrow();
+        User updated = userRepository.findWithRolesById(targetUserId).orElseThrow();
         assertThat(updated.getRoles()).anyMatch(r -> r.getCode() == RoleCode.STUDENT);
         assertThat(updated.getRoles()).noneMatch(r -> r.getCode() == RoleCode.MENTOR);
     }
@@ -119,6 +126,21 @@ class AdminControllerIT {
     }
 
     @Test
+    @DisplayName("после assignRole в admin_audit_log появилась запись ROLE_CHANGED")
+    void assignRole_shouldWriteAuditLog() {
+        restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/role", HttpMethod.PUT,
+                bearerRequest(new AdminRoleRequest(RoleCode.MENTOR), adminToken), Void.class);
+
+        assertThat(auditLogRepository.findAll())
+                .anyMatch(e -> e.getAction() == AuditAction.ROLE_CHANGED
+                        && targetUserId.equals(e.getTargetId())
+                        && adminUserId.equals(e.getAdminUserId())
+                        && e.getPayload() != null
+                        && e.getPayload().contains("MENTOR"));
+    }
+
+    @Test
     @DisplayName("пользователь не найден → 404")
     void userNotFound_shouldReturn404() {
         ResponseEntity<Object> response = restTemplate.exchange(
@@ -126,6 +148,83 @@ class AdminControllerIT {
                 bearerRequest(new AdminRoleRequest(RoleCode.MENTOR), adminToken), Object.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    // ── PUT /admin/users/{userId}/status ─────────────────────────────────────
+
+    @Test
+    @DisplayName("changeUserStatus_blocked_adminCanBlock_returns200_andWritesAudit")
+    void changeUserStatus_blocked_adminCanBlock_returns200_andWritesAudit() {
+        ResponseEntity<Void> response = restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.BLOCKED), adminToken), Void.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        User updated = userRepository.findWithRolesById(targetUserId).orElseThrow();
+        assertThat(updated.getStatus()).isEqualTo(UserStatus.BLOCKED);
+        assertThat(updated.getTokenVersion()).isEqualTo(1L);
+
+        assertThat(auditLogRepository.findAll())
+                .anyMatch(e -> e.getAction() == AuditAction.USER_STATUS_CHANGED
+                        && targetUserId.equals(e.getTargetId()));
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_anonymous_returns401")
+    void changeUserStatus_anonymous_returns401() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        ResponseEntity<Object> response = restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                new HttpEntity<>(new AdminUserStatusRequest(UserStatus.BLOCKED), headers), Object.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_student_returns403")
+    void changeUserStatus_student_returns403() {
+        ResponseEntity<Object> response = restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.BLOCKED), studentToken), Object.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_sameStatus_returns409")
+    void changeUserStatus_sameStatus_returns409() {
+        // Set user to ACTIVE first (default is EMAIL_NOT_CONFIRMED after register)
+        restTemplate.exchange("/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.ACTIVE), adminToken), Void.class);
+
+        // Same status again → 409
+        ResponseEntity<Object> response = restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.ACTIVE), adminToken), Object.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_emailNotConfirmed_returns422")
+    void changeUserStatus_emailNotConfirmed_returns422() {
+        ResponseEntity<Object> response = restTemplate.exchange(
+                "/admin/users/" + targetUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.EMAIL_NOT_CONFIRMED), adminToken), Object.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    @DisplayName("changeUserStatus_adminTarget_returns422")
+    void changeUserStatus_adminTarget_returns422() {
+        ResponseEntity<Object> response = restTemplate.exchange(
+                "/admin/users/" + adminUserId + "/status", HttpMethod.PUT,
+                bearerRequest(new AdminUserStatusRequest(UserStatus.BLOCKED), adminToken), Object.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -143,7 +242,7 @@ class AdminControllerIT {
     }
 
     private void grantAdminRole(String email) {
-        User user = userRepository.findByEmailAndDeletedFalse(email).orElseThrow();
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
         Role adminRole = roleRepository.findByCode(RoleCode.ADMIN).orElseThrow();
         user.getRoles().clear();
         user.getRoles().add(adminRole);

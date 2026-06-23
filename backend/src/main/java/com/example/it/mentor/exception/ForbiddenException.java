@@ -8,6 +8,9 @@ import org.springframework.http.HttpStatus;
  */
 public class ForbiddenException extends ApiException {
 
+    /**
+     * @param message описание причины запрета доступа
+     */
     public ForbiddenException(String message) {
         super(message, HttpStatus.FORBIDDEN);
     }

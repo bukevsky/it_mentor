@@ -185,6 +185,22 @@ class MentorProfileControllerIT {
         }
 
         @Test
+        @DisplayName("слишком длинный mentoringFrequency → 400")
+        void tooLongMentoringFrequency_shouldReturn400() {
+            String token = registerAndLogin();
+            MentorProfileRequest request = new MentorProfileRequest(
+                    "Иван", "Иванов", null, null, null,
+                    null, null, null, null, null, null,
+                    null, null, "раз в неделю ".repeat(10), null, null, null, null);
+
+            ResponseEntity<Object> response = restTemplate.exchange(
+                    "/profile/mentor", HttpMethod.PUT,
+                    bearerRequest(request, token), Object.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+
+        @Test
         @DisplayName("несуществующий cityId → 404")
         void nonExistentCity_shouldReturn404() {
             String token = registerAndLogin();
@@ -313,10 +329,16 @@ class MentorProfileControllerIT {
         }
 
         @Test
-        @DisplayName("без токена → 401")
-        void withoutToken_shouldReturn401() {
+        @DisplayName("без токена → не 401: GET /profiles/mentors/{id} публичный")
+        void withoutToken_shouldBePublic() {
             ResponseEntity<Object> response = restTemplate.getForEntity("/profiles/mentors/1", Object.class);
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            // Эндпоинт публичный (см. SecurityConfig). Допустимы 200 (есть профиль)
+            // или 404 (нет), но не 401.
+            assertThat(response.getStatusCode())
+                    .as("GET /profiles/mentors/{id} должен быть публичным")
+                    .isNotEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(response.getStatusCode())
+                    .isIn(HttpStatus.OK, HttpStatus.NOT_FOUND);
         }
     }
 

@@ -25,4 +25,8 @@ public class StudentLanguage extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false)
     private LanguageLevel level;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private int position = 0;
 }

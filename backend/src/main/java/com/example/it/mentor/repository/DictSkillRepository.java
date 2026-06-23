@@ -5,7 +5,19 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
+/**
+ * Репозиторий справочника навыков.
+ */
 public interface DictSkillRepository extends JpaRepository<DictSkill, Long> {
 
+    /**
+     * Возвращает активные навыки, отсортированные по имени.
+     *
+     * @return список активных навыков
+     */
     List<DictSkill> findByActiveTrueOrderByNameAsc();
+
+    List<DictSkill> findAllByOrderByNameAsc();
+
+    boolean existsByNameIgnoreCaseAndActiveTrue(String name);
 }

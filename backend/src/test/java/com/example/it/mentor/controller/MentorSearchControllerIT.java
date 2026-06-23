@@ -43,10 +43,12 @@ class MentorSearchControllerIT {
     class BasicCases {
 
         @Test
-        @DisplayName("без токена → 401")
-        void withoutToken_shouldReturn401() {
+        @DisplayName("без токена → 200: GET /profiles/mentors публичный")
+        void withoutToken_shouldBePublic() {
             ResponseEntity<Object> response = restTemplate.getForEntity("/profiles/mentors", Object.class);
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            assertThat(response.getStatusCode())
+                    .as("GET /profiles/mentors должен быть публичным")
+                    .isEqualTo(HttpStatus.OK);
         }
 
         @Test

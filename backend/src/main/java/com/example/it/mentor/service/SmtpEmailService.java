@@ -2,13 +2,19 @@ package com.example.it.mentor.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+/**
+ * SMTP-реализация {@link EmailService} для отправки писем через {@link JavaMailSender}.
+ */
 @Slf4j
 @Service
 @Primary
@@ -21,8 +27,16 @@ public class SmtpEmailService implements EmailService {
     @Value("${spring.mail.username}")
     private String from;
 
+    /**
+     * Отправляет пользователю письмо с OTP-кодом для сброса пароля.
+     *
+     * @param toEmail адрес получателя
+     * @param otpCode одноразовый код сброса пароля
+     */
+    @Async("mailExecutor")
     @Override
     public void sendPasswordResetOtp(String toEmail, String otpCode) {
+        long startedAt = System.nanoTime();
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
         msg.setTo(toEmail);
@@ -34,6 +48,31 @@ public class SmtpEmailService implements EmailService {
                 Если вы не запрашивали сброс пароля — проигнорируйте это письмо.
                 """.formatted(otpCode));
         mailSender.send(msg);
-        log.info("OTP-код отправлен на: {}", toEmail);
+        log.info("OTP-код отправлен: to={}, durationMs={}, step={}",
+                toEmail, durationMs(startedAt), "password_reset_otp_sent");
+    }
+
+    @Override
+    public void send(EmailMessage message) {
+        long startedAt = System.nanoTime();
+        try {
+            MimeMessage mime = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
+            helper.setFrom(from);
+            helper.setTo(message.to());
+            helper.setSubject(message.subject());
+            helper.setText(message.textBody(), message.htmlBody());
+            mailSender.send(mime);
+            log.info("Письмо отправлено: to={}, subject={}, durationMs={}, step={}",
+                    message.to(), message.subject(), durationMs(startedAt), "email_sent");
+        } catch (Exception e) {
+            log.error("Ошибка отправки письма: to={}, subject={}, durationMs={}, step={}",
+                    message.to(), message.subject(), durationMs(startedAt), "email_send_failed", e);
+            throw new RuntimeException("Ошибка отправки письма: " + e.getMessage(), e);
+        }
+    }
+
+    private static long durationMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000;
     }
 }

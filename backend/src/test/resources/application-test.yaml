@@ -2,9 +2,11 @@ spring:
   datasource:
     url: jdbc:tc:postgresql:15:///itmentor
     driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+    password: test
   jpa:
     hibernate:
       ddl-auto: validate
+    open-in-view: false
     show-sql: false
     properties:
       hibernate:
@@ -14,8 +16,42 @@ spring:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
 app:
+  jwt:
+    secret: test-secret-key-must-be-at-least-32-characters-long-for-tests
+    expiration-ms: 86400000
   storage:
     endpoint: http://localhost:9000
     access-key: testkey
     secret-key: testsecret
     bucket-name: itmentor-test
+  cors:
+    allowed-origins: http://localhost:3000
+  notifications:
+    enabled: false
+    from-name: "IT Mentor Test"
+    base-url: http://localhost:5173
+    timezone: Europe/Moscow
+    outbox:
+      max-attempts: 5
+      retry-delay-seconds: 60
+      scan-cron: "0 */1 * * * *"
+  security:
+    rate-limit:
+      auth-per-minute: 10000
+
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
+
+logging:
+  structured:
+    format:
+      console:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{requestId:--}] %logger{36} - %msg%n"
+  level:
+    com.example.it.mentor: DEBUG
+    org.springframework.security: WARN
+    liquibase: INFO

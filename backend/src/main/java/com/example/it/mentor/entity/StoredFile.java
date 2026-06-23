@@ -1,5 +1,6 @@
 package com.example.it.mentor.entity;
 
+import com.example.it.mentor.entity.enums.FileStatus;
 import com.example.it.mentor.entity.enums.FileType;
 import jakarta.persistence.*;
 import lombok.*;
@@ -33,6 +34,11 @@ public class StoredFile extends BaseEntity {
 
     @Column(name = "owner_id", nullable = false)
     private Long ownerId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20, nullable = false)
+    @Builder.Default
+    private FileStatus status = FileStatus.ACTIVE;
 
     @Builder.Default
     @Column(name = "uploaded_at", nullable = false, updatable = false)

@@ -67,8 +67,8 @@ public class StudentProfile extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String about;
 
-    @Column(length = 100)
-    private String max;
+    @Column(name = "max", length = 100)
+    private String maxContact;
 
     @ElementCollection
     @CollectionTable(name = "student_employment_types", joinColumns = @JoinColumn(name = "profile_id"))
@@ -89,10 +89,12 @@ public class StudentProfile extends BaseEntity {
     private Set<StudentEducation> educations = new HashSet<>();
 
     @OneToMany(mappedBy = "studentProfile", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
     @Builder.Default
     private Set<StudentLanguage> languages = new HashSet<>();
 
     @OneToMany(mappedBy = "studentProfile", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("position ASC")
     @Builder.Default
     private Set<StudentSkill> skills = new HashSet<>();
 

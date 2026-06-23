@@ -7,7 +7,6 @@ import com.example.it.mentor.dto.PagedResponse;
 import com.example.it.mentor.dto.RegisterRequest;
 import com.example.it.mentor.dto.chat.ChatMessageResponse;
 import com.example.it.mentor.dto.chat.ChatResponse;
-import com.example.it.mentor.dto.chat.SendMessageRequest;
 import com.example.it.mentor.dto.mentor.MentorProfileRequest;
 import com.example.it.mentor.dto.mentor.MentorProfileResponse;
 import com.example.it.mentor.dto.mentoring.MentoringRequestCreateRequest;
@@ -43,6 +42,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.util.UUID;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -218,113 +218,6 @@ class ChatControllerIT {
         }
     }
 
-    // ── POST /chats/{chatId}/messages ─────────────────────────────────────────
-
-    @Nested
-    @DisplayName("POST /chats/{chatId}/messages")
-    class SendMessage {
-
-        @Test
-        @DisplayName("текстовое сообщение → 201")
-        void sendMessage_textOnly_shouldReturn201() {
-            SendMessageRequest dto = new SendMessageRequest("Привет!", null);
-
-            ResponseEntity<ChatMessageResponse> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, studentToken), ChatMessageResponse.class);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-            assertThat(response.getBody().body()).isEqualTo("Привет!");
-            assertThat(response.getBody().senderUserId()).isNotNull();
-        }
-
-        @Test
-        @DisplayName("пустое сообщение → 422")
-        void sendMessage_emptyBody_shouldReturn422() {
-            SendMessageRequest dto = new SendMessageRequest(null, null);
-
-            ResponseEntity<Object> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, studentToken), Object.class);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
-        }
-
-        @Test
-        @DisplayName("посторонний → 403")
-        void sendMessage_nonParticipant_shouldReturn403() {
-            String otherToken = registerAndLogin("other_" + uid() + "@test.com");
-            SendMessageRequest dto = new SendMessageRequest("Hi", null);
-
-            ResponseEntity<Object> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, otherToken), Object.class);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        }
-
-        @Test
-        @DisplayName("отправить → получить историю — сообщение присутствует")
-        void sendMessage_thenGetMessages_shouldShowMessage() {
-            SendMessageRequest dto = new SendMessageRequest("Тестовое сообщение", null);
-            restTemplate.exchange("/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, studentToken), ChatMessageResponse.class);
-
-            ResponseEntity<PagedResponse<ChatMessageResponse>> history = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.GET,
-                    bearerRequest(null, studentToken), PAGED_MSG);
-
-            assertThat(history.getStatusCode()).isEqualTo(HttpStatus.OK);
-            assertThat(history.getBody().content()).hasSize(1);
-            assertThat(history.getBody().content().get(0).body()).isEqualTo("Тестовое сообщение");
-        }
-
-        @Test
-        @DisplayName("3 сообщения, size=2 → totalElements=3")
-        void sendMessage_pagination_shouldReturnCorrectPage() {
-            for (int i = 1; i <= 3; i++) {
-                restTemplate.exchange("/chats/" + chatId + "/messages", HttpMethod.POST,
-                        bearerRequest(new SendMessageRequest("Msg " + i, null), studentToken),
-                        ChatMessageResponse.class);
-            }
-
-            ResponseEntity<PagedResponse<ChatMessageResponse>> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages?page=0&size=2", HttpMethod.GET,
-                    bearerRequest(null, studentToken), PAGED_MSG);
-
-            assertThat(response.getBody().totalElements()).isEqualTo(3);
-            assertThat(response.getBody().content()).hasSize(2);
-        }
-
-        @Test
-        @DisplayName("с вложением → 201")
-        void sendMessage_withAttachment_shouldReturn201() {
-            Long fileId = uploadAttachment(studentToken);
-            SendMessageRequest dto = new SendMessageRequest(null, fileId);
-
-            ResponseEntity<ChatMessageResponse> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, studentToken), ChatMessageResponse.class);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-            assertThat(response.getBody().attachment()).isNotNull();
-            assertThat(response.getBody().attachment().fileId()).isEqualTo(fileId);
-        }
-
-        @Test
-        @DisplayName("чужой файл → 403")
-        void sendMessage_attachmentOwnedByOther_shouldReturn403() {
-            Long fileId = uploadAttachment(mentorToken);
-            SendMessageRequest dto = new SendMessageRequest(null, fileId);
-
-            ResponseEntity<Object> response = restTemplate.exchange(
-                    "/chats/" + chatId + "/messages", HttpMethod.POST,
-                    bearerRequest(dto, studentToken), Object.class);
-
-            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        }
-    }
-
     // ── POST /files/chat-attachment ───────────────────────────────────────────
 
     @Test
@@ -338,6 +231,28 @@ class ChatControllerIT {
         assertThat(response.getBody().id()).isNotNull();
     }
 
+    @Test
+    @DisplayName("устаревшие REST/SSE realtime endpoints удалены")
+    void legacyRealtimeEndpoints_shouldBeUnavailable() {
+        ResponseEntity<Object> send = restTemplate.exchange(
+                "/chats/" + chatId + "/messages", HttpMethod.POST,
+                bearerRequest(Map.of("body", "legacy"), studentToken), Object.class);
+        ResponseEntity<Object> read = restTemplate.exchange(
+                "/chats/" + chatId + "/read", HttpMethod.POST,
+                bearerRequest(null, studentToken), Object.class);
+        ResponseEntity<Object> typing = restTemplate.exchange(
+                "/chats/" + chatId + "/typing", HttpMethod.POST,
+                bearerRequest(Map.of("typing", true), studentToken), Object.class);
+        ResponseEntity<Object> events = restTemplate.exchange(
+                "/chats/events", HttpMethod.GET,
+                bearerRequest(null, studentToken), Object.class);
+
+        assertThat(send.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(read.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(typing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(events.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private String registerAndLogin(String email) {
@@ -349,7 +264,7 @@ class ChatControllerIT {
     }
 
     private void grantMentorRole(String email) {
-        User user = userRepository.findByEmailAndDeletedFalse(email).orElseThrow();
+        User user = userRepository.findWithRolesByEmailAndDeletedFalse(email).orElseThrow();
         Role mentorRole = roleRepository.findByCode(RoleCode.MENTOR).orElseThrow();
         user.getRoles().clear();
         user.getRoles().add(mentorRole);

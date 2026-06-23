@@ -22,6 +22,9 @@ import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.Set;
 
+/**
+ * Сервис аутентификации, регистрации и восстановления пароля.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -39,6 +42,15 @@ public class AuthService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
+    /**
+     * Регистрирует нового пользователя с базовой ролью студента.
+     *
+     * <p>Метод нормализует email, проверяет уникальность, создаёт пользователя и
+     * стартовый профиль студента с именем и фамилией из запроса.</p>
+     *
+     * @param request запрос регистрации
+     * @return данные зарегистрированного пользователя
+     */
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
         String email = request.email().toLowerCase();
@@ -71,10 +83,17 @@ public class AuthService {
                 .build();
         studentProfileRepository.save(profile);
 
-        log.info("Зарегистрирован новый пользователь: {}", email);
+        log.info("Зарегистрирован новый пользователь: userId={}, role={}, status={}, step={}",
+                saved.getId(), RoleCode.STUDENT, saved.getStatus(), "user_registered");
         return authMapper.toRegisterResponse(saved);
     }
 
+    /**
+     * Выполняет аутентификацию пользователя по email и паролю.
+     *
+     * @param request запрос входа
+     * @return JWT-токен и данные пользователя
+     */
     @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request) {
         String email = request.email().toLowerCase();
@@ -94,37 +113,56 @@ public class AuthService {
             throw new UnauthorizedException("Аккаунт заблокирован");
         }
 
-        String token = jwtProvider.generateToken(user.getEmail());
+        String token = jwtProvider.generateToken(user.getEmail(), user.getTokenVersion());
 
-        log.info("Успешный вход пользователя: {}", email);
+        log.info("Успешный вход пользователя: userId={}, status={}, step={}",
+                user.getId(), user.getStatus(), "login_success");
         return new LoginResponse(token, "Bearer", authMapper.toUserInfoResponse(user));
     }
 
+    /**
+     * Инициирует сброс пароля для указанного email.
+     *
+     * <p>Независимо от существования пользователя наружу возвращается успешный ответ,
+     * чтобы не раскрывать факт регистрации адреса в системе.</p>
+     *
+     * @param request email для восстановления доступа
+     */
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
         String email = request.email().toLowerCase();
 
         // ifPresent — не раскрываем факт существования email: всегда возвращаем 200
         userService.findByEmailOptional(email).ifPresent(user -> {
-            // Аннулируем все старые активные коды для этого пользователя
             passwordResetTokenRepository.invalidateAllByUserId(user.getId());
 
             String otp = generateOtp();
             PasswordResetToken resetToken = PasswordResetToken.builder()
                     .user(user)
-                    .token(otp)
+                    .tokenHash(passwordEncoder.encode(otp))
                     .expiresAt(OffsetDateTime.now().plusMinutes(otpProperties.getExpirationMinutes()))
                     .build();
             passwordResetTokenRepository.save(resetToken);
             emailService.sendPasswordResetOtp(email, otp);
-            log.info("OTP-код сброса пароля сгенерирован для: {}", email);
+            log.info("OTP-код сброса пароля сгенерирован: userId={}, expiresAt={}, step={}",
+                    user.getId(), resetToken.getExpiresAt(), "password_reset_otp_generated");
         });
     }
 
+    /**
+     * Генерирует шестизначный OTP-код.
+     *
+     * @return строковое представление OTP с ведущими нулями
+     */
     private static String generateOtp() {
         return String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
     }
 
+    /**
+     * Сбрасывает пароль по email и одноразовому коду.
+     *
+     * @param request email, OTP-код и новый пароль
+     */
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         String email = request.email().toLowerCase();
@@ -132,16 +170,24 @@ public class AuthService {
         User user = userService.findByEmailOptional(email)
                 .orElseThrow(() -> new UnauthorizedException("Недействительный код сброса пароля"));
 
-        int updated = passwordResetTokenRepository.markTokenUsed(
-                user.getId(), request.code(), OffsetDateTime.now(), otpProperties.getMaxAttempts());
+        PasswordResetToken token = passwordResetTokenRepository
+                .findActiveByUserId(user.getId(), OffsetDateTime.now(), otpProperties.getMaxAttempts())
+                .orElseThrow(() -> new UnauthorizedException("Недействительный, истёкший или заблокированный код сброса пароля"));
 
-        if (updated == 0) {
-            passwordResetTokenRepository.incrementAttempts(user.getId(), request.code());
+        if (!passwordEncoder.matches(request.code(), token.getTokenHash())) {
+            token.setAttempts(token.getAttempts() + 1);
+            if (token.getAttempts() >= otpProperties.getMaxAttempts()) {
+                token.setUsed(true);
+            }
+            passwordResetTokenRepository.save(token);
             throw new UnauthorizedException("Недействительный, истёкший или заблокированный код сброса пароля");
         }
 
+        token.setUsed(true);
+        passwordResetTokenRepository.save(token);
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userService.save(user);
-        log.info("Пароль успешно сброшен для пользователя: {}", user.getEmail());
+        log.info("Пароль пользователя успешно сброшен: userId={}, step={}",
+                user.getId(), "password_reset_completed");
     }
 }

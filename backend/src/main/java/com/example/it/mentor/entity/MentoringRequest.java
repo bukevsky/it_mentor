@@ -18,11 +18,26 @@ import static jakarta.persistence.FetchType.LAZY;
 @AllArgsConstructor
 @Entity
 @Table(name = "mentoring_requests")
-@NamedEntityGraph(name = "MentoringRequest.withProfiles",
-        attributeNodes = {
-                @NamedAttributeNode("studentProfile"),
-                @NamedAttributeNode("mentorProfile")
-        })
+@NamedEntityGraphs({
+        @NamedEntityGraph(
+                name = "MentoringRequest.withProfiles",
+                attributeNodes = {
+                        @NamedAttributeNode("studentProfile"),
+                        @NamedAttributeNode("mentorProfile")
+                }
+        ),
+        @NamedEntityGraph(
+                name = "MentoringRequest.withProfilesAndUsers",
+                attributeNodes = {
+                        @NamedAttributeNode(value = "studentProfile", subgraph = "student-profile-user"),
+                        @NamedAttributeNode(value = "mentorProfile", subgraph = "mentor-profile-user")
+                },
+                subgraphs = {
+                        @NamedSubgraph(name = "student-profile-user", attributeNodes = @NamedAttributeNode("user")),
+                        @NamedSubgraph(name = "mentor-profile-user", attributeNodes = @NamedAttributeNode("user"))
+                }
+        )
+})
 public class MentoringRequest extends BaseEntity {
 
     @Version

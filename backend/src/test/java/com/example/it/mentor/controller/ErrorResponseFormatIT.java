@@ -12,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.*;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +82,29 @@ class ErrorResponseFormatIT {
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         }
+
+        @Test
+        @DisplayName("отсутствует обязательный @RequestParam → 400 VALIDATION_ERROR, не 500")
+        void missingRequiredRequestParam_shouldReturn400() {
+            String email = "missparam_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
+            ResponseEntity<LoginResponse> loginResp = restTemplate.postForEntity(
+                    "/auth/login", new LoginRequest(email, "Password123"), LoginResponse.class);
+            String token = loginResp.getBody().accessToken();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(token);
+            ResponseEntity<ErrorResponse> response = restTemplate.exchange(
+                    "/chats/1/messages/cursor", HttpMethod.GET,
+                    new HttpEntity<>(headers), ErrorResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().error()).isEqualTo("VALIDATION_ERROR");
+            assertThat(response.getBody().details())
+                    .anyMatch(d -> d.contains("beforeMessageId"));
+        }
     }
 
     // ── 401 Unauthorized ──────────────────────────────────────────────────────
@@ -119,6 +143,27 @@ class ErrorResponseFormatIT {
             assertThat(response.getBody()).isNotNull();
             assertThat(response.getBody().status()).isEqualTo(401);
         }
+
+        @Test
+        @DisplayName("401 без токена — кириллическое сообщение в UTF-8 (не кракозябры)")
+        void noToken_shouldReturnCyrillicMessageInUtf8() {
+            ResponseEntity<byte[]> response = restTemplate.exchange(
+                    "/auth/me", HttpMethod.GET,
+                    new HttpEntity<>(new HttpHeaders()), byte[].class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+            MediaType contentType = response.getHeaders().getContentType();
+            assertThat(contentType).isNotNull();
+            assertThat(contentType.toString().toLowerCase())
+                    .as("Content-Type должен содержать charset=utf-8")
+                    .contains("charset=utf-8");
+
+            String body = new String(response.getBody(), StandardCharsets.UTF_8);
+            assertThat(body)
+                    .as("сообщение должно быть в UTF-8, без знаков '?' вместо кириллицы")
+                    .contains("Требуется аутентификация")
+                    .doesNotContain("?????");
+        }
     }
 
     // ── 404 Not Found ────────────────────────────────────────────────────────
@@ -150,6 +195,20 @@ class ErrorResponseFormatIT {
             softly.assertThat(response.getBody().message()).as("message").isNotBlank();
             softly.assertThat(response.getBody().timestamp()).as("timestamp").isNotNull();
             softly.assertAll();
+        }
+
+        @Test
+        @DisplayName("несуществующий путь (NoResourceFoundException) → 404 NOT_FOUND, не 500")
+        void unknownPath_shouldReturn404NotFound() {
+            // путь под публичным префиксом, чтобы запрос дошёл до DispatcherServlet
+            // (иначе Spring Security вернёт 401 раньше, чем сработает NoResourceFoundException)
+            ResponseEntity<ErrorResponse> response = restTemplate.getForEntity(
+                    "/dictionaries/no-such-subpath-" + UUID.randomUUID(), ErrorResponse.class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+            assertThat(response.getBody()).isNotNull();
+            assertThat(response.getBody().status()).isEqualTo(404);
+            assertThat(response.getBody().error()).isEqualTo("NOT_FOUND");
         }
     }
 
@@ -270,6 +329,50 @@ class ErrorResponseFormatIT {
         void getHealthWithoutToken_shouldReturn200() {
             ResponseEntity<Object> response = restTemplate.getForEntity("/actuator/health", Object.class);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        @Test
+        @DisplayName("GET /profiles/mentors без токена → 200 (публичный поиск менторов)")
+        void getMentorListWithoutToken_shouldReturn200() {
+            ResponseEntity<Object> response = restTemplate.getForEntity("/profiles/mentors", Object.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+    }
+
+    // ── 403 Forbidden — UTF-8 в сообщении ─────────────────────────────────────
+
+    @Nested
+    @DisplayName("403 Forbidden — UTF-8")
+    class ForbiddenEncoding {
+
+        @Test
+        @DisplayName("403 для STUDENT → /admin/** — кириллическое сообщение в UTF-8")
+        void studentToAdminPath_shouldReturn403WithCyrillicUtf8() {
+            String email = "enc403_" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+            restTemplate.postForEntity("/auth/register",
+                    new RegisterRequest(email, "Password123", "Иван", "Иванов"), Object.class);
+            ResponseEntity<LoginResponse> loginResp = restTemplate.postForEntity(
+                    "/auth/login", new LoginRequest(email, "Password123"), LoginResponse.class);
+            String token = loginResp.getBody().accessToken();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(token);
+            ResponseEntity<byte[]> response = restTemplate.exchange(
+                    "/admin/users", HttpMethod.GET,
+                    new HttpEntity<>(headers), byte[].class);
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            MediaType contentType = response.getHeaders().getContentType();
+            assertThat(contentType).isNotNull();
+            assertThat(contentType.toString().toLowerCase())
+                    .as("Content-Type должен содержать charset=utf-8")
+                    .contains("charset=utf-8");
+
+            String body = new String(response.getBody(), StandardCharsets.UTF_8);
+            assertThat(body)
+                    .as("сообщение 403 должно быть в UTF-8")
+                    .contains("Доступ запрещён")
+                    .doesNotContain("?????");
         }
     }
 }

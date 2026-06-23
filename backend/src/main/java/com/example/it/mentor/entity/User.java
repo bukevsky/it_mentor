@@ -18,6 +18,10 @@ public class User extends BaseEntity {
     @Version
     private Long version;
 
+    @Builder.Default
+    @Column(name = "token_version", nullable = false)
+    private Long tokenVersion = 0L;
+
     @Column(nullable = false, length = 255)
     private String email;
 
@@ -35,7 +39,7 @@ public class User extends BaseEntity {
     @Column(name = "avatar_file_id")
     private Long avatarFileId;
 
-    @ManyToMany(fetch = FetchType.EAGER)
+    @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "user_roles",
             joinColumns = @JoinColumn(name = "user_id"),
@@ -43,4 +47,18 @@ public class User extends BaseEntity {
     )
     @Builder.Default
     private Set<Role> roles = new HashSet<>();
+
+    public boolean hasRole(RoleCode code) {
+        return roles.stream().anyMatch(role -> role.getCode() == code);
+    }
+
+    public RoleCode primaryRole() {
+        if (hasRole(RoleCode.MENTOR)) {
+            return RoleCode.MENTOR;
+        }
+        if (hasRole(RoleCode.ADMIN)) {
+            return RoleCode.ADMIN;
+        }
+        return RoleCode.STUDENT;
+    }
 }

@@ -3,6 +3,7 @@ package com.example.it.mentor.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -27,7 +28,14 @@ public class Chat extends BaseEntity {
     @Column(name = "mentor_user_id", nullable = false)
     private Long mentorUserId;
 
-    @OneToMany(mappedBy = "chat", fetch = LAZY)
+    @Column(name = "last_message_at")
+    private OffsetDateTime lastMessageAt;
+
+    @Column(name = "last_sender_user_id")
+    private Long lastSenderUserId;
+
+    @OneToMany(mappedBy = "chat", fetch = LAZY,
+               cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private Set<ChatMessage> messages = new HashSet<>();
 }

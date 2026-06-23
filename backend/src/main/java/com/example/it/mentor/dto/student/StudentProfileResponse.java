@@ -18,7 +18,7 @@ public record StudentProfileResponse(
         Integer hoursPerWeek,
         LocalDate availableFrom,
         String about,
-        String max,
+        String maxContact,
         Set<String> employmentTypes,
         Set<String> workFormats,
         List<StudentEducationResponse> educations,

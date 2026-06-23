@@ -4,7 +4,7 @@ spring:
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:itmentor}
     username: ${DB_USER:itmentor}
-    password: ${DB_PASSWORD:itmentor}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -16,6 +16,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    open-in-view: false
     show-sql: false
     properties:
       jakarta:
@@ -47,16 +48,39 @@ spring:
 
 app:
   jwt:
-    secret: ${JWT_SECRET:CHANGE-ME-set-JWT_SECRET-env-var-in-production-32chars}
+    secret: ${JWT_SECRET}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   otp:
     expiration-minutes: 15
     max-attempts: 5
+  notifications:
+    enabled: ${NOTIFICATIONS_ENABLED:true}
+    from-name: "IT Mentor"
+    base-url: ${APP_BASE_URL:http://localhost:5173}
+    timezone: ${APP_TIMEZONE:Europe/Moscow}
+    outbox:
+      max-attempts: 5
+      retry-delay-seconds: 60
+      scan-cron: "0 */1 * * * *"
   storage:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-    access-key: ${MINIO_ACCESS_KEY:minioadmin}
-    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
     bucket-name: ${MINIO_BUCKET:itmentor}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  websocket:
+    heartbeat-ms: 10000
+  security:
+    rate-limit:
+      auth-per-minute: 10
+      paths: /auth/login,/auth/password/forgot,/auth/password/reset
+
+springdoc:
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false
 
 management:
   endpoints:
@@ -65,14 +89,15 @@ management:
         include: health,prometheus,info
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
   metrics:
     tags:
       application: ${spring.application.name}
 
 logging:
-  pattern:
-    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(%logger{36}){cyan} - %msg%n"
+  structured:
+    format:
+      console: logstash
   level:
     com.example.it.mentor: INFO
     org.springframework.security: WARN

@@ -10,6 +10,9 @@ import org.springframework.http.HttpStatus;
  */
 public class BusinessRuleViolationException extends ApiException {
 
+    /**
+     * @param message описание нарушения бизнес-правила
+     */
     public BusinessRuleViolationException(String message) {
         super(message, HttpStatus.UNPROCESSABLE_ENTITY);
     }

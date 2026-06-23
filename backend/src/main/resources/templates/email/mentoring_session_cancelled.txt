@@ -1,0 +1,6 @@
+[(${recipientName})], здравствуйте!
+
+Сессия менторинга отменена.
+[# th:if="${reason != null and !#strings.isEmpty(reason)}"]Причина: [(${reason})]
+[/]
+Личный кабинет: [(${actionUrl})]

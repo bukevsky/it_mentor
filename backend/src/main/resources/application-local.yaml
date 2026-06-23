@@ -1,4 +1,16 @@
+app:
+  jwt:
+    secret: local-dev-secret-key-only-not-for-production-use-32chars
+  storage:
+    access-key: minioadmin
+    secret-key: minioadmin
+  cors:
+    allowed-origins: http://localhost:3000,http://localhost:4200
+
 logging:
+  structured:
+    format:
+      console:
   pattern:
     console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%-5level) %clr([%X{requestId:--}] [%X{userId:--}]){faint} %clr(%logger{36}){cyan} - %msg%n"
   level:
@@ -6,7 +18,15 @@ logging:
     org.springframework.security: DEBUG
     liquibase: INFO
 
+springdoc:
+  swagger-ui:
+    enabled: true
+  api-docs:
+    enabled: true
+
 spring:
+  datasource:
+    password: itmentor
   mail:
     host: localhost
     port: 1025
