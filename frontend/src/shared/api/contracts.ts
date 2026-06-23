@@ -617,6 +617,106 @@ export interface TypingRequest {
   typing: boolean;
 }
 
+export type ChatMessageDeliveryStatus = "SENT" | "DELIVERED" | "READ";
+
+export interface SendMessageCommand {
+  requestId: string;
+  body: string | null;
+  attachmentFileId: number | null;
+}
+
+export interface MessageStatusCommand {
+  requestId: string;
+  upToMessageId: number;
+}
+
+export interface TypingCommand {
+  requestId: string;
+  typing: boolean;
+}
+
+export interface ChatCommandAckPayload {
+  command: "send" | "delivered" | "read" | "typing";
+  resourceId: number | null;
+  duplicate: boolean;
+}
+
+export interface ChatCommandErrorPayload {
+  code:
+    | "NOT_FOUND"
+    | "FORBIDDEN"
+    | "CONFLICT"
+    | "BUSINESS_RULE_VIOLATION"
+    | "VALIDATION_ERROR"
+    | "INTERNAL_ERROR";
+  message: string;
+  fieldErrors: Record<string, string>;
+}
+
+export interface MessageStatusChangedPayload {
+  actorUserId: number;
+  upToMessageId: number;
+  status: "DELIVERED" | "READ";
+  changedAt: string;
+  changedCount: number;
+}
+
+export interface ChatTypingPayload {
+  chatId: number;
+  userId: number;
+  typing: boolean;
+}
+
+export interface PresenceChangedPayload {
+  userId: number;
+  status: "online" | "offline";
+  lastSeenAt: string | null;
+}
+
+export type ChatEventEnvelope =
+  | {
+      type: "chat.command.ack";
+      requestId: string;
+      chatId: number;
+      occurredAt: string;
+      payload: ChatCommandAckPayload;
+    }
+  | {
+      type: "chat.command.error";
+      requestId: string | null;
+      chatId: number | null;
+      occurredAt: string;
+      payload: ChatCommandErrorPayload;
+    }
+  | {
+      type: "chat.message.created";
+      requestId: string;
+      chatId: number;
+      occurredAt: string;
+      payload: ChatMessageResponse;
+    }
+  | {
+      type: "chat.message.status.changed";
+      requestId: string;
+      chatId: number;
+      occurredAt: string;
+      payload: MessageStatusChangedPayload;
+    }
+  | {
+      type: "chat.typing";
+      requestId: string;
+      chatId: number;
+      occurredAt: string;
+      payload: ChatTypingPayload;
+    }
+  | {
+      type: "presence.changed";
+      requestId: null;
+      chatId: null;
+      occurredAt: string;
+      payload: PresenceChangedPayload;
+    };
+
 export interface AdminRoleRequest {
   role: "STUDENT" | "MENTOR";
 }

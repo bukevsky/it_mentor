@@ -22,8 +22,13 @@ export const chatApi = {
       `/chats/${chatId}/messages${buildQuery(params)}`
     );
   },
-  getMessagesCursor(chatId: number, params: { beforeMessageId?: number; limit?: number } = {}) {
+  getMessagesCursor(chatId: number, params: { beforeMessageId: number; limit?: number }) {
     return request<ChatMessageResponse[]>(`/chats/${chatId}/messages/cursor${buildQuery(params)}`);
+  },
+  syncMessages(chatId: number, afterMessageId: number, limit = 100) {
+    return request<ChatMessageResponse[]>(
+      `/chats/${chatId}/messages/sync${buildQuery({ afterMessageId, limit })}`
+    );
   },
   sendMessage(chatId: number, payload: SendMessageRequest) {
     return request<ChatMessageResponse>(`/chats/${chatId}/messages`, {
