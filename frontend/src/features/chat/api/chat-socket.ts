@@ -1,143 +1,182 @@
-import type { ChatMessageResponse } from "@/shared/api/contracts";
+import {
+  Client,
+  type IFrame,
+  type IMessage,
+  type StompConfig,
+  type StompSubscription
+} from "@stomp/stompjs";
+import type {
+  ChatEventEnvelope,
+  ChatMessageResponse,
+  MessageStatusCommand,
+  SendMessageCommand,
+  TypingCommand
+} from "@/shared/api/contracts";
 import { env } from "@/shared/config/env";
 import { tokenStorage } from "@/shared/lib/token-storage";
+import {
+  buildChatSocketUrl,
+  CHAT_EVENTS_DESTINATION,
+  CHAT_SOCKET_PATH,
+  chatDestination,
+  parseChatEvent
+} from "./chat-protocol";
 
-export const CHAT_SOCKET_ENDPOINT = "/chats/events";
+export const CHAT_SOCKET_ENDPOINT = CHAT_SOCKET_PATH;
 
-type ChatEventName = "chat.message.created" | "chat.read" | "chat.typing" | "presence.changed";
+export interface StompClientPort {
+  onConnect: (frame: IFrame) => void;
+  onStompError: (frame: IFrame) => void;
+  onWebSocketClose: (event: CloseEvent) => void;
+  activate(): void;
+  deactivate(): Promise<void>;
+  publish(params: { destination: string; body: string }): void;
+  subscribe(destination: string, callback: (message: IMessage) => void): StompSubscription;
+}
+
+export type StompClientFactory = (config: StompConfig) => StompClientPort;
 
 export interface ChatSocketAdapter {
   connect(): Promise<void>;
-  disconnect(): void;
+  disconnect(): Promise<void>;
+  onConnect(handler: () => void): void;
+  onDisconnect(handler: () => void): void;
+  onEvent(handler: (event: ChatEventEnvelope) => void): void;
+  onError(handler: (error: Error) => void): void;
+  sendMessage(chatId: number, command: SendMessageCommand): void;
+  markDelivered(chatId: number, command: MessageStatusCommand): void;
+  markRead(chatId: number, command: MessageStatusCommand): void;
+  sendTyping(chatId: number, command: TypingCommand): void;
   subscribe(chatId: number): void;
   onMessage(handler: (message: ChatMessageResponse) => void): void;
-  onDisconnect(handler: () => void): void;
 }
 
-type ParsedSseEvent = {
-  event: ChatEventName | "";
-  data: string;
-};
+interface CreateChatStompClientOptions {
+  token?: string;
+  apiBaseUrl?: string;
+  appOrigin?: string;
+  clientFactory?: StompClientFactory;
+}
 
-const parseEventBlock = (block: string): ParsedSseEvent => {
-  let event: ParsedSseEvent["event"] = "";
-  const data: string[] = [];
+const defaultClientFactory: StompClientFactory = (config) => new Client(config);
 
-  block.split(/\r?\n/).forEach((line) => {
-    if (!line || line.startsWith(":")) {
-      return;
-    }
+export const createChatStompClient = (
+  options: CreateChatStompClientOptions = {}
+): ChatSocketAdapter => {
+  const token = options.token ?? tokenStorage.get();
+  if (!token) {
+    throw new Error("Missing access token");
+  }
 
-    if (line.startsWith("event:")) {
-      event = line.slice("event:".length).trim() as ParsedSseEvent["event"];
-      return;
-    }
+  const appOrigin = options.appOrigin ?? window.location.origin;
+  const clientFactory = options.clientFactory ?? defaultClientFactory;
+  const pendingMessages = new Map<string, { chatId: number; command: SendMessageCommand }>();
+  let connectHandler: (() => void) | null = null;
+  let disconnectHandler: (() => void) | null = null;
+  let eventHandler: ((event: ChatEventEnvelope) => void) | null = null;
+  let errorHandler: ((error: Error) => void) | null = null;
+  let messageHandler: ((message: ChatMessageResponse) => void) | null = null;
+  let resolveConnect: (() => void) | null = null;
+  let rejectConnect: ((error: Error) => void) | null = null;
 
-    if (line.startsWith("data:")) {
-      data.push(line.slice("data:".length).trimStart());
-    }
+  const client = clientFactory({
+    brokerURL: buildChatSocketUrl(options.apiBaseUrl ?? env.apiBaseUrl, appOrigin),
+    connectHeaders: { Authorization: `Bearer ${token}` },
+    reconnectDelay: 3000,
+    heartbeatIncoming: 10_000,
+    heartbeatOutgoing: 10_000
   });
 
-  return {
-    event,
-    data: data.join("\n")
+  const publish = (destination: string, command: object) => {
+    client.publish({ destination, body: JSON.stringify(command) });
   };
-};
 
-export const createChatSseClient = (): ChatSocketAdapter => {
-  let abortController: AbortController | null = null;
-  let messageHandler: ((message: ChatMessageResponse) => void) | null = null;
-  let disconnectHandler: (() => void) | null = null;
-  let isManualDisconnect = false;
-
-  const handleEvent = (block: string) => {
-    const parsed = parseEventBlock(block);
-
-    if (parsed.event !== "chat.message.created" || !parsed.data) {
-      return;
-    }
-
+  const handleFrame = (frame: IMessage) => {
     try {
-      messageHandler?.(JSON.parse(parsed.data) as ChatMessageResponse);
-    } catch {
-      // Некорректное событие не должно обрывать весь SSE-поток.
+      const event = parseChatEvent(frame.body);
+      if (!event) {
+        return;
+      }
+
+      if (event.type === "chat.command.ack" && event.payload.command === "send") {
+        pendingMessages.delete(event.requestId);
+      }
+
+      if (event.type === "chat.message.created") {
+        messageHandler?.(event.payload);
+      }
+      eventHandler?.(event);
+    } catch (error) {
+      errorHandler?.(error instanceof Error ? error : new Error("Malformed chat event"));
     }
   };
 
-  const readStream = async (response: Response, signal: AbortSignal) => {
-    const reader = response.body?.getReader();
+  client.onConnect = () => {
+    client.subscribe(CHAT_EVENTS_DESTINATION, handleFrame);
+    pendingMessages.forEach(({ chatId, command }) => {
+      publish(chatDestination(chatId, "send"), command);
+    });
+    resolveConnect?.();
+    resolveConnect = null;
+    rejectConnect = null;
+    connectHandler?.();
+  };
 
-    if (!reader) {
-      throw new Error("SSE stream is unavailable");
-    }
+  client.onStompError = (frame) => {
+    const error = new Error(frame.headers.message ?? "STOMP connection error");
+    rejectConnect?.(error);
+    resolveConnect = null;
+    rejectConnect = null;
+    errorHandler?.(error);
+  };
 
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (!signal.aborted) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      let separatorIndex = buffer.search(/\r?\n\r?\n/);
-      while (separatorIndex >= 0) {
-        const block = buffer.slice(0, separatorIndex);
-        const separatorLength = buffer[separatorIndex] === "\r" ? 4 : 2;
-        buffer = buffer.slice(separatorIndex + separatorLength);
-        handleEvent(block);
-        separatorIndex = buffer.search(/\r?\n\r?\n/);
-      }
-    }
+  client.onWebSocketClose = () => {
+    disconnectHandler?.();
   };
 
   return {
-    async connect() {
-      const token = tokenStorage.get();
-
-      if (!token) {
-        throw new Error("Missing access token");
-      }
-
-      isManualDisconnect = false;
-      abortController = new AbortController();
-
-      const response = await fetch(`${env.apiBaseUrl}${CHAT_SOCKET_ENDPOINT}`, {
-        headers: {
-          Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`
-        },
-        signal: abortController.signal
+    connect() {
+      return new Promise<void>((resolve, reject) => {
+        resolveConnect = resolve;
+        rejectConnect = reject;
+        client.activate();
       });
-
-      if (!response.ok) {
-        throw new Error(`SSE connection failed with status ${response.status}`);
-      }
-
-      void readStream(response, abortController.signal)
-        .catch(() => undefined)
-        .finally(() => {
-          if (!isManualDisconnect && !abortController?.signal.aborted) {
-            disconnectHandler?.();
-          }
-        });
     },
     disconnect() {
-      isManualDisconnect = true;
-      abortController?.abort();
-      abortController = null;
+      return client.deactivate();
     },
-    subscribe(_chatId: number) {
-      // SSE-подписка идёт сразу на все чаты пользователя; отдельная подписка не нужна.
-    },
-    onMessage(handler) {
-      messageHandler = handler;
+    onConnect(handler) {
+      connectHandler = handler;
     },
     onDisconnect(handler) {
       disconnectHandler = handler;
+    },
+    onEvent(handler) {
+      eventHandler = handler;
+    },
+    onError(handler) {
+      errorHandler = handler;
+    },
+    sendMessage(chatId, command) {
+      pendingMessages.set(command.requestId, { chatId, command });
+      publish(chatDestination(chatId, "send"), command);
+    },
+    markDelivered(chatId, command) {
+      publish(chatDestination(chatId, "delivered"), command);
+    },
+    markRead(chatId, command) {
+      publish(chatDestination(chatId, "read"), command);
+    },
+    sendTyping(chatId, command) {
+      publish(chatDestination(chatId, "typing"), command);
+    },
+    subscribe(_chatId) {
+      // The backend exposes one user-scoped queue for all chats.
+    },
+    onMessage(handler) {
+      messageHandler = handler;
     }
   };
 };
+
+export const createChatSseClient = createChatStompClient;
