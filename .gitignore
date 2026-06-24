@@ -63,6 +63,7 @@ output.log
 
 # Local
 .DS_Store
+.worktrees/
 
 # Env
 credentials.env
