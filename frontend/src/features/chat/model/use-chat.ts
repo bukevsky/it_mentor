@@ -157,10 +157,7 @@ export const useChat = () => {
   });
 
   const orderedMessages = computed<ChatViewMessage[]>(() => {
-    const serverMessages = [...(messages.value?.content ?? [])].map((message) => ({
-      ...message,
-      deliveryStatus: "sent" as const
-    }));
+    const serverMessages = [...(messages.value?.content ?? [])];
 
     return [...serverMessages, ...optimisticMessages.value]
       .filter((message) => message.chatId === activeChat.value?.id)

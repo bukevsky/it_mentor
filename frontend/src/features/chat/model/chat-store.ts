@@ -2,11 +2,16 @@ import { reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import type {
   AttachmentInfo,
+  ChatMessageDeliveryStatus,
   ChatMessageResponse,
   ChatResponse,
+  ChatTypingPayload,
   ErrorResponse,
+  MessageStatusChangedPayload,
   MentoringRequestResponse,
-  PagedResponse
+  PagedResponse,
+  PresenceChangedPayload,
+  SendMessageCommand
 } from "@/shared/api/contracts";
 import { useAuthStore } from "@/features/auth/model/auth-store";
 import { mentoringApi } from "@/features/mentoring/api/mentoring-api";
@@ -15,12 +20,10 @@ import { filesApi } from "@/features/files/api/files-api";
 import { imageCache } from "@/features/files/model/image-cache";
 import { chatApi } from "../api/chat-api";
 
-export type ChatDeliveryStatus = "sending" | "sent" | "error";
-
-export interface ChatViewMessage extends ChatMessageResponse {
-  deliveryStatus?: ChatDeliveryStatus;
-  tempId?: string;
-}
+export type ChatLocalDeliveryStatus = "sending" | "error";
+export type ChatViewMessage = Omit<ChatMessageResponse, "deliveryStatus"> & {
+  deliveryStatus: ChatMessageDeliveryStatus | ChatLocalDeliveryStatus;
+};
 
 const toPagedResponse = <T>(content: T[]): PagedResponse<T> => ({
   content,
@@ -45,9 +48,11 @@ export const useChatStore = defineStore("chat", () => {
   const chats = ref<PagedResponse<ChatResponse> | null>(null);
   const activeChat = ref<ChatResponse | null>(null);
   const messages = ref<PagedResponse<ChatMessageResponse> | null>(null);
-  const lastMessages = ref<Record<number, ChatMessageResponse | null>>({});
+  const lastMessages = ref<Record<number, ChatViewMessage | null>>({});
   const requestDetails = ref<Record<number, MentoringRequestResponse | null>>({});
   const optimisticMessages = ref<ChatViewMessage[]>([]);
+  const typingByChatId = ref<Record<number, ChatTypingPayload>>({});
+  const presenceByUserId = ref<Record<number, PresenceChangedPayload>>({});
   const readChatIds = ref<Set<number>>(new Set());
   const error = ref<ErrorResponse | null>(null);
   const successMessage = ref("");
@@ -127,6 +132,8 @@ export const useChatStore = defineStore("chat", () => {
     lastMessages.value = {};
     requestDetails.value = {};
     optimisticMessages.value = [];
+    typingByChatId.value = {};
+    presenceByUserId.value = {};
     readChatIds.value = new Set();
     error.value = null;
     successMessage.value = "";
@@ -224,7 +231,6 @@ export const useChatStore = defineStore("chat", () => {
       markChatRead(chatId);
       await loadRequestDetails([activeChat.value]);
       messages.value = await chatApi.getMessages(chatId, { page: 0, size: 80 });
-      void chatApi.markAsRead(chatId);
       lastMessages.value = {
         ...lastMessages.value,
         [chatId]: messages.value.content[0] ?? lastMessages.value[chatId] ?? null
@@ -258,7 +264,6 @@ export const useChatStore = defineStore("chat", () => {
       markChatRead(chat.id);
       await loadRequestDetails([chat]);
       messages.value = await chatApi.getMessages(chat.id, { page: 0, size: 80 });
-      void chatApi.markAsRead(chat.id);
 
       if (!chats.value?.content.some((item) => item.id === chat.id)) {
         upsertChat(chat);
@@ -272,87 +277,6 @@ export const useChatStore = defineStore("chat", () => {
       error.value = normalizeErrorResponse(rawError, "/chats/by-request/{requestId}");
     } finally {
       isOpeningByRequestId.value = false;
-    }
-  };
-
-  const sendMessage = async () => {
-    if (!activeChat.value) {
-      error.value = {
-        timestamp: new Date().toISOString(),
-        status: 0,
-        error: "FORM_ERROR",
-        message: "Сначала откройте чат.",
-        path: "/chats/{chatId}/messages"
-      };
-      return;
-    }
-
-    const body = form.body.trim();
-
-    if (!body && !form.attachmentFileId) {
-      return;
-    }
-
-    const chat = activeChat.value;
-    const tempId = `temp-${Date.now()}`;
-    const pendingMessage: ChatViewMessage = {
-      id: -Date.now(),
-      tempId,
-      chatId: chat.id,
-      senderUserId: authStore.user?.id ?? 0,
-      body: body || null,
-      attachment: form.uploadedAttachment,
-      createdAt: new Date().toISOString(),
-      deliveryStatus: "sending"
-    };
-
-    optimisticMessages.value = [...optimisticMessages.value, pendingMessage];
-    isSending.value = true;
-    error.value = null;
-    successMessage.value = "";
-
-    try {
-      const sentMessage = await chatApi.sendMessage(chat.id, {
-        body: body || null,
-        attachmentFileId: form.attachmentFileId
-      });
-
-      optimisticMessages.value = optimisticMessages.value.map((message) =>
-        message.tempId === tempId ? { ...sentMessage, deliveryStatus: "sent" } : message
-      );
-      lastMessages.value = {
-        ...lastMessages.value,
-        [chat.id]: sentMessage
-      };
-      if (chats.value) {
-        chats.value = {
-          ...chats.value,
-          content: sortChatsByActivity(
-            chats.value.content.map((item) =>
-              item.id === chat.id
-                ? {
-                    ...item,
-                    lastMessage: sentMessage,
-                    lastMessageAt: sentMessage.createdAt,
-                    lastSenderUserId: sentMessage.senderUserId
-                  }
-                : item
-            )
-          )
-        };
-      }
-      form.body = "";
-      form.attachmentFile = null;
-      form.attachmentFileId = null;
-      form.uploadedAttachment = null;
-      void loadChats();
-    } catch (rawError) {
-      optimisticMessages.value = optimisticMessages.value.map((message) =>
-        message.tempId === tempId ? { ...message, deliveryStatus: "error" } : message
-      );
-      error.value = normalizeErrorResponse(rawError, `/chats/${chat.id}/messages`);
-    } finally {
-      isSending.value = false;
     }
   };
 
@@ -390,23 +314,30 @@ export const useChatStore = defineStore("chat", () => {
     isUploadingAttachment.value = false;
   };
 
-  const createPendingMessage = () => {
+  const createPendingMessage = (requestId: string) => {
     if (!activeChat.value) {
       return null;
     }
 
     const body = form.body.trim();
-    if (!body) {
+    if (!body && !form.attachmentFileId) {
       return null;
     }
 
+    const command: SendMessageCommand = {
+      requestId,
+      body: body || null,
+      attachmentFileId: form.attachmentFileId
+    };
     const pendingMessage: ChatViewMessage = {
       id: -Date.now(),
-      tempId: `temp-${Date.now()}`,
       chatId: activeChat.value.id,
       senderUserId: authStore.user?.id ?? 0,
+      clientMessageId: requestId,
       body: body || null,
-      attachment: null,
+      attachment: form.uploadedAttachment,
+      deliveredAt: null,
+      readAt: null,
       createdAt: new Date().toISOString(),
       deliveryStatus: "sending"
     };
@@ -417,16 +348,19 @@ export const useChatStore = defineStore("chat", () => {
       [activeChat.value.id]: pendingMessage
     };
     form.body = "";
+    form.attachmentFile = null;
+    form.attachmentFileId = null;
+    form.uploadedAttachment = null;
     isSending.value = true;
     error.value = null;
     successMessage.value = "";
 
-    return pendingMessage;
+    return { message: pendingMessage, command };
   };
 
-  const confirmPendingMessage = (tempId: string, sentMessage: ChatMessageResponse) => {
+  const confirmPendingMessage = (requestId: string, sentMessage: ChatMessageResponse) => {
     optimisticMessages.value = optimisticMessages.value.map((message) =>
-      message.tempId === tempId ? { ...sentMessage, tempId, deliveryStatus: "sent" } : message
+      message.clientMessageId === requestId ? sentMessage : message
     );
     lastMessages.value = {
       ...lastMessages.value,
@@ -435,14 +369,107 @@ export const useChatStore = defineStore("chat", () => {
     isSending.value = false;
   };
 
-  const failPendingMessage = (tempId: string) => {
+  const failPendingMessage = (requestId: string, messageText = "Не удалось отправить сообщение.") => {
     optimisticMessages.value = optimisticMessages.value.map((message) =>
-      message.tempId === tempId ? { ...message, deliveryStatus: "error" } : message
+      message.clientMessageId === requestId ? { ...message, deliveryStatus: "error" } : message
     );
     isSending.value = false;
+    error.value = {
+      timestamp: new Date().toISOString(),
+      status: 0,
+      error: "CHAT_COMMAND_ERROR",
+      message: messageText,
+      path: "/ws"
+    };
+  };
+
+  const applyMessageStatus = (payload: MessageStatusChangedPayload) => {
+    const updateMessage = <T extends ChatMessageResponse | ChatViewMessage>(message: T): T => {
+      if (message.id > payload.upToMessageId || message.senderUserId === payload.actorUserId) {
+        return message;
+      }
+
+      return {
+        ...message,
+        deliveryStatus: payload.status,
+        deliveredAt: message.deliveredAt ?? payload.changedAt,
+        readAt: payload.status === "READ" ? payload.changedAt : message.readAt
+      } as T;
+    };
+
+    if (messages.value) {
+      messages.value = {
+        ...messages.value,
+        content: messages.value.content.map(updateMessage)
+      };
+    }
+    optimisticMessages.value = optimisticMessages.value.map(updateMessage);
+    lastMessages.value = Object.fromEntries(
+      Object.entries(lastMessages.value).map(([chatId, message]) => [
+        chatId,
+        message ? updateMessage(message) : null
+      ])
+    );
+  };
+
+  const applyTyping = (payload: ChatTypingPayload) => {
+    typingByChatId.value = {
+      ...typingByChatId.value,
+      [payload.chatId]: payload
+    };
+  };
+
+  const applyPresence = (payload: PresenceChangedPayload) => {
+    presenceByUserId.value = {
+      ...presenceByUserId.value,
+      [payload.userId]: payload
+    };
+  };
+
+  const mergeSyncedMessages = (syncedMessages: ChatMessageResponse[]) => {
+    const current = messages.value?.content ?? [];
+    const byId = new Map(current.map((message) => [message.id, message]));
+    syncedMessages.forEach((message) => byId.set(message.id, message));
+    messages.value = toPagedResponse([...byId.values()]);
+    syncedMessages.forEach((message) => {
+      lastMessages.value = {
+        ...lastMessages.value,
+        [message.chatId]: message
+      };
+    });
+  };
+
+  const getLastKnownMessageId = (chatId: number) => {
+    const ids = [
+      ...(messages.value?.content ?? []),
+      ...optimisticMessages.value
+    ]
+      .filter((message) => message.chatId === chatId && message.id > 0)
+      .map((message) => message.id);
+    return ids.length ? Math.max(...ids) : 0;
+  };
+
+  const getHighestIncomingMessageId = (chatId: number) => {
+    const currentUserId = authStore.user?.id;
+    const ids = (messages.value?.content ?? [])
+      .filter(
+        (message) =>
+          message.chatId === chatId && message.senderUserId !== currentUserId && message.id > 0
+      )
+      .map((message) => message.id);
+    return ids.length ? Math.max(...ids) : null;
+  };
+
+  const getPeerUserId = (chat: ChatResponse | null = activeChat.value) => {
+    if (!chat) {
+      return null;
+    }
+    return authStore.user?.id === chat.studentUserId ? chat.mentorUserId : chat.studentUserId;
   };
 
   const receiveSocketMessage = (message: ChatMessageResponse) => {
+    const isIncoming = message.senderUserId !== authStore.user?.id;
+    const isActive = activeChat.value?.id === message.chatId;
     lastMessages.value = {
       ...lastMessages.value,
       [message.chatId]: message
@@ -453,8 +480,6 @@ export const useChatStore = defineStore("chat", () => {
     if (!isKnownChat) {
       void chatApi.getById(message.chatId)
         .then((chat) => {
-          const isIncoming = message.senderUserId !== authStore.user?.id;
-          const isActive = activeChat.value?.id === message.chatId;
           upsertChat({
             ...chat,
             lastMessage: message,
@@ -476,9 +501,6 @@ export const useChatStore = defineStore("chat", () => {
               return chat;
             }
 
-            const isIncoming = message.senderUserId !== authStore.user?.id;
-            const isActive = activeChat.value?.id === message.chatId;
-
             return {
               ...chat,
               lastMessage: message,
@@ -494,25 +516,18 @@ export const useChatStore = defineStore("chat", () => {
     if (activeChat.value?.id === message.chatId) {
       const existingMessages = messages.value?.content ?? [];
       const alreadyExists = existingMessages.some((item) => item.id === message.id);
-      const optimisticMatchIndex = optimisticMessages.value.findIndex((item) => {
-        if (item.id === message.id) {
-          return true;
-        }
-
-        return (
-          item.deliveryStatus === "sending" &&
-          item.chatId === message.chatId &&
-          item.senderUserId === message.senderUserId &&
-          item.body === message.body
-        );
-      });
+      const optimisticMatchIndex = optimisticMessages.value.findIndex(
+        (item) =>
+          item.id === message.id ||
+          (item.chatId === message.chatId && item.clientMessageId === message.clientMessageId)
+      );
 
       if (optimisticMatchIndex >= 0) {
         optimisticMessages.value = optimisticMessages.value.map((item, index) =>
-          index === optimisticMatchIndex
-            ? { ...message, tempId: item.tempId, deliveryStatus: "sent" }
-            : item
+          index === optimisticMatchIndex ? message : item
         );
+        isSending.value = false;
+        setSuccess("Сообщение отправлено.");
       }
 
       if (!alreadyExists && optimisticMatchIndex < 0) {
@@ -520,15 +535,18 @@ export const useChatStore = defineStore("chat", () => {
       }
 
       markChatRead(message.chatId);
-      void chatApi.markAsRead(message.chatId);
-      return;
+      return { delivered: isIncoming, read: isIncoming };
     }
 
     markChatUnread(message.chatId);
+    return { delivered: isIncoming, read: false };
   };
 
   return {
     activeChat,
+    applyMessageStatus,
+    applyPresence,
+    applyTyping,
     chats,
     clearAttachment,
     confirmPendingMessage,
@@ -536,6 +554,9 @@ export const useChatStore = defineStore("chat", () => {
     error,
     failPendingMessage,
     form,
+    getHighestIncomingMessageId,
+    getLastKnownMessageId,
+    getPeerUserId,
     isLoadingChats,
     isLoadingMessages,
     isOpeningByRequestId,
@@ -546,14 +567,16 @@ export const useChatStore = defineStore("chat", () => {
     loadMessages,
     markChatRead,
     messages,
+    mergeSyncedMessages,
     openByRequestId,
     optimisticMessages,
+    presenceByUserId,
     readChatIds,
     receiveSocketMessage,
     requestDetails,
     reset,
-    sendMessage,
     successMessage,
+    typingByChatId,
     uploadAttachment
   };
 });

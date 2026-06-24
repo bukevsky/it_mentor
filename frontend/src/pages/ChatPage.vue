@@ -62,8 +62,9 @@ const openRequests = () => {
   void router.push({ name: "requests" });
 };
 
-const handleOpenChat = (chatId: number) => {
-  void chatStore.loadMessages(chatId);
+const handleOpenChat = async (chatId: number) => {
+  await chatStore.loadMessages(chatId);
+  chatSocket.markActiveChatRead();
   if (props.isMobile) {
     isMobileChatOpen.value = true;
   }
@@ -103,8 +104,14 @@ const scrollThreadToBottom = async () => {
 };
 
 const handleSendMessage = () => {
-  void chatSocket.sendActiveMessage();
+  chatSocket.sendTyping(false);
+  chatSocket.sendActiveMessage();
   void scrollThreadToBottom();
+};
+
+const handleBodyUpdate = (value: string) => {
+  form.value.body = value;
+  chatSocket.sendTyping(value.trim().length > 0);
 };
 
 const handleAttachmentFile = (file: File | null) => {
@@ -130,9 +137,10 @@ watch(
 
 watch(
   () => route.query.chatId,
-  (chatId) => {
+  async (chatId) => {
     if (chatId && typeof chatId === "string") {
-      void chatStore.loadMessages(Number(chatId));
+      await chatStore.loadMessages(Number(chatId));
+      chatSocket.markActiveChatRead();
       if (props.isMobile) {
         isMobileChatOpen.value = true;
       }
@@ -155,10 +163,8 @@ watch(
 
 watch(
   () => activeChat.value?.id,
-  (nextChatId) => {
-    if (nextChatId) {
-      chatSocket.subscribe(nextChatId);
-    }
+  () => {
+    chatSocket.markActiveChatRead();
   }
 );
 </script>
@@ -211,7 +217,7 @@ watch(
             :subtitle="selectedChatSubtitle"
             :request-goal="activeRequestGoal"
             :socket-status-label="chatSocket.statusLabel.value"
-            :is-online="chatSocket.status.value === 'connected'"
+            :is-online="chatSocket.isPeerOnline.value"
             @open-requests="openRequests"
           />
 
@@ -243,7 +249,7 @@ watch(
               :attachment-uploaded="form.attachmentFileId !== null"
               :disabled="!canSendMessage"
               :is-sending="isSending"
-              @update:body="form.body = $event"
+              @update:body="handleBodyUpdate"
               @update:attachment-file="handleAttachmentFile"
               @send="handleSendMessage"
             />

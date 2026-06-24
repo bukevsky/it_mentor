@@ -24,10 +24,17 @@ const timeLabel = (value: string) =>
   new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 
 const deliveryLabel = () => {
-  if (props.message.deliveryStatus === "sending") return "sending";
-  if (props.message.deliveryStatus === "error") return "error";
-  if (props.message.senderUserId === props.currentUserId) return "sent";
-  return "";
+  if (props.message.senderUserId !== props.currentUserId) return "";
+
+  const labels = {
+    sending: "sending",
+    error: "error",
+    SENT: "sent",
+    DELIVERED: "delivered",
+    READ: "read"
+  } as const;
+
+  return labels[props.message.deliveryStatus];
 };
 
 const fileExt = (filename = "") => {

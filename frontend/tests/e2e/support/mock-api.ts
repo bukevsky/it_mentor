@@ -227,19 +227,25 @@ export const registerApiMocks = async (page: Page, options: MockOptions = {}) =>
       mentorUserId: 31,
       createdAt: now
     },
+    files: [] as (typeof uploadedFile)[],
     messages: [
       {
         id: 501,
         chatId: 401,
         senderUserId: 31,
+        clientMessageId: "00000000-0000-4000-8000-000000000501",
         body: "Давайте начнём с резюме и текущего опыта.",
         attachment: null,
+        deliveryStatus: "READ",
+        deliveredAt: now,
+        readAt: now,
         createdAt: now
       },
       {
         id: 502,
         chatId: 401,
         senderUserId: 17,
+        clientMessageId: "00000000-0000-4000-8000-000000000502",
         body: "Отправил резюме и список тем, которые хочу закрыть в первую очередь.",
         attachment: {
           fileId: 901,
@@ -247,6 +253,9 @@ export const registerApiMocks = async (page: Page, options: MockOptions = {}) =>
           contentType: "application/pdf",
           size: 20480
         },
+        deliveryStatus: "READ",
+        deliveredAt: "2026-04-07T10:05:00.000Z",
+        readAt: "2026-04-07T10:05:00.000Z",
         createdAt: "2026-04-07T10:05:00.000Z"
       }
     ]
@@ -363,10 +372,27 @@ export const registerApiMocks = async (page: Page, options: MockOptions = {}) =>
     }
 
     if (method === "POST" && path === "/mentoring/requests") {
+      const payload = request.postDataJSON() as {
+        mentorProfileId: number;
+        goalType: string;
+        message: string;
+      };
+      const selectedMentor =
+        mentorCards.find((mentor) => mentor.id === payload.mentorProfileId) ?? mentorCards[0];
       const created = {
         ...state.requests[0],
         id: state.requests.length + 301,
-        status: "SENT"
+        mentorProfileId: selectedMentor.id,
+        mentorProfile: {
+          id: selectedMentor.id,
+          firstName: selectedMentor.firstName,
+          lastName: selectedMentor.lastName,
+          position: selectedMentor.position
+        },
+        direction: "STUDENT_TO_MENTOR" as const,
+        status: "SENT",
+        goalType: payload.goalType,
+        message: payload.message
       };
 
       state.requests.unshift(created);
@@ -436,24 +462,30 @@ export const registerApiMocks = async (page: Page, options: MockOptions = {}) =>
       });
     }
 
-    if (method === "POST" && path === "/chats/401/messages") {
-      const payload = request.postDataJSON() as { body?: string | null };
-      state.messages.push({
-        id: state.messages.length + 501,
-        chatId: 401,
-        senderUserId: 17,
-        body: payload.body ?? null,
-        attachment: null,
-        createdAt: "2026-04-07T10:10:00.000Z"
-      });
+    if (method === "GET" && path === "/chats/401/messages/sync") {
+      return json(route, []);
+    }
 
-      return json(route, state.messages[state.messages.length - 1], 201);
+    if (method === "GET" && path === "/presence/31") {
+      return json(route, { userId: 31, status: "online", lastSeenAt: null });
+    }
+
+    if (method === "GET" && path === "/files") {
+      return json(route, {
+        content: state.files,
+        page: 0,
+        size: 200,
+        totalElements: state.files.length,
+        totalPages: state.files.length ? 1 : 0,
+        last: true
+      });
     }
 
     if (
       method === "POST" &&
       ["/files/resume", "/files/portfolio", "/files/avatar", "/files/chat-attachment"].includes(path)
     ) {
+      state.files = [uploadedFile];
       return json(route, uploadedFile, 201);
     }
 

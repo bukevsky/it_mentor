@@ -603,8 +603,12 @@ export interface ChatMessageResponse {
   id: number;
   chatId: number;
   senderUserId: number;
+  clientMessageId: string;
   body: string | null;
   attachment: AttachmentInfo | null;
+  deliveryStatus: ChatMessageDeliveryStatus;
+  deliveredAt: string | null;
+  readAt: string | null;
   createdAt: string;
 }
 

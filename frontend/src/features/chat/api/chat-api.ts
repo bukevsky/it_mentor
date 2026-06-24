@@ -1,8 +1,7 @@
 import type {
   ChatMessageResponse,
   ChatResponse,
-  PagedResponse,
-  SendMessageRequest
+  PagedResponse
 } from "@/shared/api/contracts";
 import { request } from "@/shared/api/http";
 import { buildQuery } from "@/shared/api/query";
@@ -30,21 +29,4 @@ export const chatApi = {
       `/chats/${chatId}/messages/sync${buildQuery({ afterMessageId, limit })}`
     );
   },
-  sendMessage(chatId: number, payload: SendMessageRequest) {
-    return request<ChatMessageResponse>(`/chats/${chatId}/messages`, {
-      method: "POST",
-      body: payload
-    });
-  },
-  markAsRead(chatId: number) {
-    return request<void>(`/chats/${chatId}/read`, {
-      method: "POST"
-    });
-  },
-  sendTyping(chatId: number, typing: boolean) {
-    return request<void>(`/chats/${chatId}/typing`, {
-      method: "POST",
-      body: { typing }
-    });
-  }
 };

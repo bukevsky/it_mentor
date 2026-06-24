@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { registerApiMocks, setStableClientState } from "./support/mock-api";
+import { registerStompMock } from "./support/mock-stomp";
 
 test.describe("IT Mentor UI", () => {
   test("renders guest home and auth screens", async ({ page }) => {
@@ -8,8 +9,8 @@ test.describe("IT Mentor UI", () => {
 
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: /Рабочее пространство/ })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Войти в аккаунт" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "IT Mentor Platform" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Аккаунт" })).toBeVisible();
     await expect(page).toHaveScreenshot("guest-home.png", {
       fullPage: true,
       animations: "disabled",
@@ -30,13 +31,14 @@ test.describe("IT Mentor UI", () => {
   test("lets authenticated user browse mentors and requests", async ({ page }) => {
     await setStableClientState(page, true);
     await registerApiMocks(page, { authenticated: true });
+    await registerStompMock(page);
 
     await page.goto("/mentors");
 
-    await expect(page.getByRole("heading", { name: "Поиск менторов" })).toBeVisible();
-    await expect(page.getByText("Найдено менторов: 2")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Выбрать" })).toHaveCount(2);
-    await page.getByRole("button", { name: "Выбрать" }).first().click();
+    await expect(page.getByRole("heading", { name: "Найдите ментора под свою цель" })).toBeVisible();
+    await expect(page.getByText("менторов найдено")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Связаться" })).toHaveCount(1);
+    await page.getByRole("button", { name: "Связаться" }).click();
     await page.getByRole("button", { name: "Отправить заявку" }).click();
     await expect(page.getByText("Заявка отправлена.")).toBeVisible();
     await expect(page).toHaveScreenshot("mentors-directory.png", {
@@ -46,10 +48,9 @@ test.describe("IT Mentor UI", () => {
     });
 
     await page.goto("/requests");
-    await expect(page.getByText("Заявка #301")).toBeVisible();
-    await page.getByRole("button", { name: "Открыть" }).first().click();
-    await page.getByRole("button", { name: "Принять" }).click();
-    await expect(page.getByText("Статус обновлён: ACCEPTED")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Заявки", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Отозвать" }).click();
+    await expect(page.getByText(/^Отозвано:/)).toBeVisible();
     await expect(page).toHaveScreenshot("requests-detail.png", {
       fullPage: true,
       animations: "disabled",
@@ -60,13 +61,14 @@ test.describe("IT Mentor UI", () => {
   test("lets authenticated user work with chat and files", async ({ page }) => {
     await setStableClientState(page, true);
     await registerApiMocks(page, { authenticated: true });
+    await registerStompMock(page);
 
     await page.goto("/chat");
 
-    await expect(page.getByRole("heading", { name: "Список диалогов" })).toBeVisible();
-    await expect(page.getByText("Чат #401")).toBeVisible();
-    await page.getByRole("button", { name: "Открыть" }).first().click();
-    await page.getByRole("button", { name: "Отправить сообщение" }).click();
+    await expect(page.getByText("Воронова Анна").first()).toBeVisible();
+    await page.getByRole("button", { name: /Воронова Анна/ }).click();
+    await page.getByPlaceholder("Сообщение").fill("Сообщение через STOMP");
+    await page.getByRole("button", { name: "Отправить" }).click();
     await expect(page.getByText("Сообщение отправлено.")).toBeVisible();
     await expect(page).toHaveScreenshot("chat-flow.png", {
       fullPage: true,
